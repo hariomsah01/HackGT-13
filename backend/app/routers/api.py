@@ -1,0 +1,315 @@
+from __future__ import annotations
+
+import json
+from typing import Optional
+
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
+
+from app.engines.auth import authenticate, list_users_public, verify_token
+from app.models.schemas import AskRequest, LoginRequest, MessageRequest, NoteRequest
+
+router = APIRouter(prefix="/api")
+
+
+def eng(request: Request):
+    return request.app.state.engine
+
+
+def user_from(authorization: Optional[str]):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Please sign in")
+    user = verify_token(authorization.removeprefix("Bearer ").strip())
+    if not user:
+        raise HTTPException(401, "Session expired — sign in again")
+    return user
+
+
+@router.get("/health")
+def health(request: Request):
+    e = eng(request)
+    return {
+        "status": "ok",
+        "patients": len(e.store.list_patients()),
+        "product": "ClearPath Care Space",
+        "muse": e.muse.enabled,
+        "gemini": e.ask.enabled,
+    }
+
+
+@router.get("/auth/users")
+def users():
+    return list_users_public()
+
+
+@router.post("/auth/login")
+def login(body: LoginRequest):
+    result = authenticate(body.user_id, body.pin)
+    if not result:
+        raise HTTPException(401, "Wrong account or PIN")
+    user, token = result
+    return {"token": token, "user": user.model_dump()}
+
+
+@router.get("/auth/me")
+def me(authorization: Optional[str] = Header(default=None)):
+    return user_from(authorization).model_dump()
+
+
+@router.get("/patients")
+def list_patients(request: Request, authorization: Optional[str] = Header(default=None)):
+    user_from(authorization)
+    e = eng(request)
+    return [
+        {
+            "id": p.id,
+            "label": p.label,
+            "age": p.age,
+            "conditions": [c.name for c in p.conditions],
+            "active_prescriptions": len(
+                [x for x in p.prescriptions if x.status == "active"]
+            ),
+            "team": [m.label for m in p.team],
+        }
+        for p in e.store.list_patients()
+    ]
+
+
+@router.post("/patients")
+def create_patient(
+    request: Request, authorization: Optional[str] = Header(default=None)
+):
+    user = user_from(authorization)
+    if user.kind != "doctor":
+        raise HTTPException(403, "Only doctors can add patients")
+    e = eng(request)
+    patient = e.create_patient()
+    e.store.log(
+        user.id, user.label, patient.id, "created", f"{user.label} added {patient.label}"
+    )
+    return patient.model_dump()
+
+
+@router.get("/patients/{patient_id}")
+def get_patient(
+    patient_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = user_from(authorization)
+    e = eng(request)
+    try:
+        return e.open_patient(patient_id, user)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/patients/{patient_id}/messages")
+def post_message(
+    patient_id: str,
+    body: MessageRequest,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = user_from(authorization)
+    e = eng(request)
+    try:
+        return e.post_message(patient_id, user, body.text.strip())
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/patients/{patient_id}/notes")
+def add_note(
+    patient_id: str,
+    body: NoteRequest,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = user_from(authorization)
+    e = eng(request)
+    try:
+        patient = e.add_note(patient_id, user, body.text)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return patient.model_dump()
+
+
+@router.post("/patients/{patient_id}/brief")
+def brief_room(
+    patient_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    user_from(authorization)
+    e = eng(request)
+    try:
+        return e.brief(patient_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/patients/{patient_id}/visit")
+async def capture_visit(
+    patient_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    audio: Optional[UploadFile] = File(default=None),
+    demo: str = Form(default="false"),
+):
+    """Muse Voice → transcript → Muse Spark structured shared note."""
+    user = user_from(authorization)
+    if user.kind != "doctor":
+        raise HTTPException(403, "Only doctors can capture visits")
+    e = eng(request)
+    wav = await audio.read() if audio is not None else None
+    use_demo = demo.lower() in ("1", "true", "yes") or not wav
+    try:
+        return e.capture_visit(patient_id, user, wav if not use_demo else None, demo=use_demo)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/activity")
+def activity(
+    request: Request,
+    patient_id: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+):
+    user_from(authorization)
+    return [
+        a.model_dump()
+        for a in eng(request).store.activity_feed(patient_id=patient_id)
+    ]
+
+
+@router.get("/analytics")
+def analytics(
+    request: Request, authorization: Optional[str] = Header(default=None)
+):
+    user_from(authorization)
+    return eng(request).analytics()
+
+
+@router.post("/patients/{patient_id}/summary")
+def summary(
+    patient_id: str,
+    body: AskRequest,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    user_from(authorization)
+    e = eng(request)
+    try:
+        text = e.patient_summary(patient_id, body.question)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"text": text}
+
+
+@router.post("/ask")
+def ask_screen(
+    body: AskRequest,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Ask across the whole care platform (Gemini + chart fallback)."""
+    user = user_from(authorization)
+    e = eng(request)
+    return e.ask_screen(
+        body.question,
+        user,
+        body.patient_id,
+        body.tab,
+        body.screen,
+    )
+
+
+# ── Real-time room WebSocket ─────────────────────────────────
+
+class RoomHub:
+    def __init__(self) -> None:
+        self.rooms: dict[str, set[WebSocket]] = {}
+
+    async def join(self, patient_id: str, ws: WebSocket) -> None:
+        await ws.accept()
+        self.rooms.setdefault(patient_id, set()).add(ws)
+
+    def leave(self, patient_id: str, ws: WebSocket) -> None:
+        if patient_id in self.rooms:
+            self.rooms[patient_id].discard(ws)
+
+    async def broadcast(self, patient_id: str, payload: dict) -> None:
+        dead = []
+        for ws in list(self.rooms.get(patient_id, set())):
+            try:
+                await ws.send_text(json.dumps(payload))
+            except Exception:  # noqa: BLE001
+                dead.append(ws)
+        for ws in dead:
+            self.leave(patient_id, ws)
+
+
+hub = RoomHub()
+
+
+@router.websocket("/ws/{patient_id}")
+async def room_socket(websocket: WebSocket, patient_id: str):
+    """Live presence + event fanout for a patient room."""
+    token = websocket.query_params.get("token")
+    user = verify_token(token or "")
+    if not user:
+        await websocket.close(code=4401)
+        return
+
+    engine = websocket.app.state.engine
+    await hub.join(patient_id, websocket)
+    presence = engine.store.set_presence(patient_id, user.id, user.label, user.kind)
+    await hub.broadcast(
+        patient_id,
+        {"type": "presence", "presence": presence, "actor": user.label},
+    )
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            kind = data.get("type")
+            if kind == "ping":
+                await websocket.send_text(json.dumps({"type": "pong"}))
+            elif kind == "message" and data.get("text"):
+                result = engine.post_message(patient_id, user, data["text"])
+                await hub.broadcast(
+                    patient_id,
+                    {
+                        "type": "room_update",
+                        "room": result["room"],
+                        "briefing": result["briefing"],
+                        "actor": user.label,
+                    },
+                )
+            elif kind == "brief":
+                briefing = engine.brief(patient_id)
+                await hub.broadcast(
+                    patient_id,
+                    {"type": "briefing", "briefing": briefing, "actor": user.label},
+                )
+    except WebSocketDisconnect:
+        presence = engine.store.clear_presence(patient_id, user.id)
+        await hub.broadcast(
+            patient_id,
+            {"type": "presence", "presence": presence, "actor": user.label},
+        )
+        hub.leave(patient_id, websocket)
