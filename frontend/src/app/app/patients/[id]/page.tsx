@@ -778,7 +778,14 @@ export default function PatientRoomPage() {
             {(data.room?.messages || []).map((m) => (
               <div key={m.id} className="rounded-xl bg-slate-50 px-3 py-2 text-sm">
                 <div className="flex justify-between text-xs text-[var(--muted)]">
-                  <span className="font-semibold text-[var(--ink)]">{m.author_label}</span>
+                  <span className="font-semibold text-[var(--ink)]">
+                    {m.author_label}
+                    {m.to_label ? (
+                      <span className="ml-1.5 font-normal text-[var(--muted)]">
+                        → {m.to_label}
+                      </span>
+                    ) : null}
+                  </span>
                   <span>{new Date(m.timestamp).toLocaleTimeString()}</span>
                 </div>
                 <p className="mt-1">{m.text}</p>
