@@ -1,3 +1,5 @@
+# HackGT 13
+
 # Prior Authorization Process
 
 ```mermaid
@@ -45,26 +47,45 @@ flowchart TD
 
     S6["STEP 6: DECISION"]
 
+    TIMELINE["TYPICAL DECISION TIMELINE<br/><br/>
+    🟢 Standard request<br/>
+    Up to about 7 calendar days<br/>
+    for many applicable plans<br/><br/>
+    🔴 Urgent / expedited request<br/>
+    Up to about 72 hours<br/>
+    for many applicable plans<br/><br/>
+    ⚠️ Exact timeframe depends on the<br/>
+    insurance plan, type of service,<br/>
+    and applicable rules."]
+
     APPROVED{"APPROVED"}
     DENIED{"DENIED"}
 
-    S7A["STEP 7A: TREATMENT CAN PROCEED"]
+    S7A["STEP 7A: TREATMENT CAN PROCEED<br/><br/>
+    The requested treatment can proceed,<br/>
+    subject to the plan's other requirements."]
 
     S7B["STEP 7B: APPEAL<br/><br/>
-    Doctor/patient may request a review of the denial."]
+    Doctor/patient may request a review<br/>
+    of the denial."]
 
     ADDITIONAL["Additional medical information<br/>may be submitted."]
 
     APPEAL["APPEAL DECISION"]
 
-    A_APPROVED["APPROVED<br/><br/>Treatment proceeds"]
+    A_APPROVED["APPROVED<br/><br/>
+    Treatment proceeds"]
 
     A_DENIED["DENIED<br/><br/>
-    Patient/provider may consider<br/>other available options"]
+    Patient/provider may consider<br/>
+    other available options"]
 
     COST["PATIENT COST<br/><br/>
-    Approval does not necessarily mean the patient pays $0.<br/><br/>
-    Patient may still have deductible, copay, or coinsurance depending on the plan."]
+    Approval does not necessarily mean<br/>
+    the patient pays $0.<br/><br/>
+    Patient may still have a deductible,<br/>
+    copay, or coinsurance depending<br/>
+    on the plan."]
 
 
     START --> S1
@@ -79,8 +100,11 @@ flowchart TD
     S3 --> S4
     S4 --> S5
     S5 --> S6
+
     S6 --> APPROVED
     S6 --> DENIED
+
+    S6 -.-> TIMELINE
 
     APPROVED --> S7A
     S7A --> COST
@@ -93,4 +117,22 @@ flowchart TD
     APPEAL --> A_DENIED
 
     A_APPROVED --> COST
+    A_DENIED --> COST
+
+
+    classDef step fill:#1f2937,color:#ffffff,stroke:#9ca3af,stroke-width:2px;
+    classDef decision fill:#374151,color:#ffffff,stroke:#d1d5db,stroke-width:2px;
+    classDef timeline fill:#172554,color:#ffffff,stroke:#60a5fa,stroke-width:2px;
+    classDef approved fill:#14532d,color:#ffffff,stroke:#4ade80,stroke-width:2px;
+    classDef denied fill:#7f1d1d,color:#ffffff,stroke:#f87171,stroke-width:2px;
+    classDef normal fill:#374151,color:#ffffff,stroke:#9ca3af,stroke-width:2px;
+    classDef cost fill:#3f3f46,color:#ffffff,stroke:#facc15,stroke-width:2px;
+
+    class S1,S2,S3,S4,S5,S6,S7A,S7B,ADDITIONAL,APPEAL,A_APPROVED,A_DENIED step;
+    class DECISION decision;
+    class TIMELINE timeline;
+    class APPROVED,A_APPROVED approved;
+    class DENIED,A_DENIED denied;
+    class NORMAL,TREATMENT1 normal;
+    class COST cost;
 ```
