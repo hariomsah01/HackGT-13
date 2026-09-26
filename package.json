@@ -1,0 +1,17 @@
+{
+  "name": "medical-case-portal",
+  "version": "1.0.0",
+  "description": "Doctor and patient views for submitting medical cases and tracking insurance review status.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^2.0.2"
+  }
+}

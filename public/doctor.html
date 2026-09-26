@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Doctor View</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <strong>Doctor View</strong>
+        <span>Submit a patient case</span>
+      </div>
+      <nav class="nav">
+        <a class="active" href="/doctor.html">Doctor</a>
+        <a href="/patient.html">Patient</a>
+      </nav>
+    </header>
+    <main class="wrap">
+      <section class="card">
+        <div class="login-chip">
+          <span class="dot" aria-hidden="true"></span>
+          Logged in as Dr. Sarah Chen
+        </div>
+        <h1>New case submission</h1>
+        <p class="meta">All fields and PDF files are sent to the server on submit.</p>
+        <form id="case-form">
+          <input type="hidden" name="doctorName" value="Dr. Sarah Chen" />
+          <label>
+            Patient Name
+            <input name="patientName" type="text" required maxlength="120" />
+          </label>
+          <label>
+            Patient ID
+            <input name="patientId" type="text" required maxlength="60" />
+          </label>
+          <label>
+            Patient Age
+            <input name="patientAge" type="number" min="0" max="130" required />
+          </label>
+          <label>
+            Other medical information
+            <textarea name="medicalInfo" placeholder="Diagnosis notes, history, medications..."></textarea>
+          </label>
+          <label>
+            PDF files (up to 10)
+            <span class="hint">Select one or more PDF files. They are stored in the server uploads folder.</span>
+            <input
+              name="pdfs"
+              type="file"
+              accept="application/pdf,.pdf"
+              multiple
+            />
+          </label>
+          <button class="btn" type="submit">Submit case</button>
+        </form>
+        <p id="message" class="alert hidden" role="status"></p>
+      </section>
+    </main>
+    <script src="/doctor.js"></script>
+  </body>
+</html>

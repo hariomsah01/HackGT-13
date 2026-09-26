@@ -136,3 +136,15 @@ flowchart TD
     class NORMAL,TREATMENT1 normal;
     class COST cost;
 ```
+
+## Medical Case Portal (Doctor / Patient UI)
+
+Doctor View submits patient details and PDFs. Patient View looks up status by name and ID.
+
+```bash
+npm install
+npm start
+```
+
+Open http://localhost:3000. After a doctor submits a case, the patient sees **Waiting for insurance to review**.
+

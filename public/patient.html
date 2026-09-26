@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Patient View</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <strong>Patient View</strong>
+        <span>Look up your case status</span>
+      </div>
+      <nav class="nav">
+        <a href="/doctor.html">Doctor</a>
+        <a class="active" href="/patient.html">Patient</a>
+      </nav>
+    </header>
+    <main class="wrap">
+      <section class="card">
+        <h1>Patient status login</h1>
+        <p class="meta">Enter the same name and ID the doctor submitted.</p>
+        <form id="status-form">
+          <label>
+            Patient Name
+            <input name="patientName" type="text" required maxlength="120" />
+          </label>
+          <label>
+            Patient ID
+            <input name="patientId" type="text" required maxlength="60" />
+          </label>
+          <button class="btn patient" type="submit">Check status</button>
+        </form>
+        <p id="message" class="alert hidden" role="status"></p>
+        <div id="result" class="hidden">
+          <div class="status-banner" id="status-banner"></div>
+          <h2>Submitted medical details</h2>
+          <div class="details">
+            <div class="row"><span>Patient name</span><span id="out-name"></span></div>
+            <div class="row"><span>Patient ID</span><span id="out-id"></span></div>
+            <div class="row"><span>Age</span><span id="out-age"></span></div>
+            <div class="row"><span>Doctor</span><span id="out-doctor"></span></div>
+            <div class="row"><span>Submitted</span><span id="out-date"></span></div>
+            <div class="row"><span>Medical information</span><span id="out-info"></span></div>
+            <div class="row">
+              <span>PDF files</span>
+              <ul class="files" id="out-files"></ul>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="/patient.js"></script>
+  </body>
+</html>
