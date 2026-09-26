@@ -57,7 +57,7 @@ export default function MePage() {
   if (!user || user.kind !== "patient") return null;
 
   return (
-    <main className="workspace w-full max-w-5xl">
+    <main className="workspace w-full max-w-none">
       <h1 className="font-display text-3xl font-bold">My care</h1>
       <p className="mt-2 text-sm text-[var(--muted)]">
         Your doctors already share this information. You should not need to re-explain your

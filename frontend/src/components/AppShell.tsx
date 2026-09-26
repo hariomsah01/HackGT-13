@@ -64,7 +64,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (inApp) {
     return (
       <AskScreenProvider>
-        <div className="flex min-h-screen min-h-dvh w-full bg-[var(--paper)]">
+        <div className="flex min-h-screen min-h-dvh w-full max-w-none bg-[var(--paper)]">
           {/* Always-visible desktop rail from 768px up */}
           <aside className="sticky top-0 z-30 hidden h-dvh w-[240px] shrink-0 flex-col bg-[var(--sidebar)] text-white md:flex xl:w-[280px]">
             <div className="flex items-center gap-3 px-5 py-6">
@@ -145,8 +145,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               ))}
             </nav>
 
-            {/* Desktop content header strip */}
-            <div className="hidden border-b border-[var(--line)] bg-white px-6 py-3 md:flex md:items-center md:justify-between xl:px-8">
+            {/* Desktop content header strip — full remaining width */}
+            <div className="hidden w-full border-b border-[var(--line)] bg-white px-[var(--pad)] py-3 md:flex md:items-center md:justify-between">
               <p className="text-sm text-[var(--muted)]">
                 Shared care space · live across Doctors A–D
               </p>
@@ -158,7 +158,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </p>
             </div>
 
-            <div className="flex w-full min-w-0 flex-1 flex-col">{children}</div>
+            <div className="flex w-full min-w-0 max-w-none flex-1 flex-col">
+              {children}
+            </div>
           </div>
           <GlobalAsk />
         </div>
@@ -168,9 +170,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <AskScreenProvider>
-      <div className="flex min-h-screen min-h-dvh w-full flex-col bg-[var(--paper)]">
-        <header className="sticky top-0 z-40 w-full border-b border-[var(--line)] bg-white/90 backdrop-blur">
-          <div className="flex w-full items-center justify-between gap-4 px-[var(--pad)] py-3">
+      <div className="flex min-h-screen min-h-dvh w-full max-w-none flex-col bg-[var(--paper)]">
+        <header className="sticky top-0 z-40 w-full max-w-none border-b border-[var(--line)] bg-white/90 backdrop-blur">
+          <div className="flex w-full max-w-none items-center justify-between gap-4 px-[var(--pad)] py-3.5 lg:px-16 xl:px-20 2xl:px-24">
             <Logo />
             <div className="flex items-center gap-2">
               {user ? (
@@ -195,7 +197,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </header>
-        <div className="flex w-full flex-1 flex-col">{children}</div>
+        <div className="flex w-full max-w-none flex-1 flex-col">{children}</div>
         {user && <GlobalAsk />}
       </div>
     </AskScreenProvider>

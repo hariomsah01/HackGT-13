@@ -42,7 +42,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="shell mx-auto flex min-h-[calc(100vh-4.5rem)] max-w-lg flex-col justify-center py-10">
+    <main className="shell mx-auto flex min-h-[calc(100vh-4.5rem)] min-h-[calc(100dvh-4.5rem)] flex-col justify-center py-10">
       <h1 className="font-display text-3xl font-bold">Sign in</h1>
       <p className="mt-2 text-sm text-[var(--muted)]">
         Choose who you are. Doctors share the patient room together.
