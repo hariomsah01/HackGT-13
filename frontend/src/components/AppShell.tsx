@@ -66,7 +66,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <AskScreenProvider>
         <div className="flex min-h-screen min-h-dvh w-full max-w-none bg-[var(--paper)]">
           {/* Always-visible desktop rail from 768px up */}
-          <aside className="sticky top-0 z-30 hidden h-dvh w-[240px] shrink-0 flex-col bg-[var(--sidebar)] text-white md:flex xl:w-[280px]">
+          <aside className="sticky top-0 z-30 hidden h-dvh w-60 shrink-0 flex-col bg-[var(--sidebar)] text-white md:flex xl:w-[17.5rem]">
             <div className="flex items-center gap-3 px-5 py-6">
               <Mark light />
               <div>
@@ -172,7 +172,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <AskScreenProvider>
       <div className="flex min-h-screen min-h-dvh w-full max-w-none flex-col bg-[var(--paper)]">
         <header className="sticky top-0 z-40 w-full max-w-none border-b border-[var(--line)] bg-white/90 backdrop-blur">
-          <div className="flex w-full max-w-none items-center justify-between gap-4 px-[var(--pad)] py-3.5 lg:px-16 xl:px-20 2xl:px-24">
+          <div className="site-wrap flex items-center justify-between gap-4 py-3.5">
             <Logo />
             <div className="flex items-center gap-2">
               {user ? (
