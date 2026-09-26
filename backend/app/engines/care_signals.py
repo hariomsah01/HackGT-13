@@ -35,6 +35,8 @@ def doctor_last_activity(
     presence = {p["id"]: p for p in store.get_presence(patient_id)}
     last: dict[str, dict[str, Any]] = {}
     for ev in feed:
+        if ev.kind in ("viewed", "ask"):
+            continue
         if ev.actor_id not in team_ids and not ev.actor_id.startswith("doctor_"):
             continue
         if ev.actor_id in last:
@@ -87,7 +89,12 @@ def care_attention(patient: Patient, briefing: Optional[dict] = None) -> dict[st
                 "level": "info",
                 "code": "multi_prescriber",
                 "title": "Shared regimen",
-                "detail": f"Active medicines from {', '.join(labels)} — align before changing doses.",
+                "detail": f"Active medicines from {', '.join(labels)}. Align before changing doses.",
+                "patient_title": "Medicines from more than one doctor",
+                "patient_detail": (
+                    f"Your active medicines come from {', '.join(labels)}. "
+                    "Ask before starting or stopping any of them."
+                ),
             }
         )
 
@@ -107,7 +114,12 @@ def care_attention(patient: Patient, briefing: Optional[dict] = None) -> dict[st
                     "level": "review",
                     "code": "kidney_meds",
                     "title": "Kidney + medicines",
-                    "detail": f"CKD chart includes {', '.join(kidney_meds)} — labs and dose review matter.",
+                    "detail": f"CKD chart includes {', '.join(kidney_meds)}. Labs and dose review matter.",
+                    "patient_title": "Kidney care and your medicines",
+                    "patient_detail": (
+                        f"Your kidney plan includes {', '.join(kidney_meds)}. "
+                        "Keep your lab visits so doses stay safe."
+                    ),
                 }
             )
 
@@ -123,7 +135,15 @@ def care_attention(patient: Patient, briefing: Optional[dict] = None) -> dict[st
                     "level": "caution",
                     "code": "anticoag",
                     "title": "Anticoagulation active",
-                    "detail": f"{', '.join(blood_thinners)} on chart — bleeding risk if another doctor adds NSAIDs or procedures.",
+                    "detail": (
+                        f"{', '.join(blood_thinners)} on chart. "
+                        "Bleeding risk if another doctor adds NSAIDs or procedures."
+                    ),
+                    "patient_title": "Blood thinner alert",
+                    "patient_detail": (
+                        f"You take {', '.join(blood_thinners)}. "
+                        "Tell every doctor and dentist before new medicines or procedures."
+                    ),
                 }
             )
 
@@ -134,7 +154,12 @@ def care_attention(patient: Patient, briefing: Optional[dict] = None) -> dict[st
                 "level": "review",
                 "code": "polypharmacy",
                 "title": "Busy medicine list",
-                "detail": f"{len(active)} active meds on one shared chart — good moment for a team med review.",
+                "detail": f"{len(active)} active meds on one shared chart. Good moment for a team med review.",
+                "patient_title": "Many medicines on your list",
+                "patient_detail": (
+                    f"You have {len(active)} active medicines. "
+                    "Bring your full list to each visit."
+                ),
             }
         )
 
@@ -145,6 +170,11 @@ def care_attention(patient: Patient, briefing: Optional[dict] = None) -> dict[st
                 "code": "open_question",
                 "title": "Open team question",
                 "detail": str(briefing.get("open_question")),
+                "patient_title": "Your care team has an open item",
+                "patient_detail": (
+                    "Your doctors are still closing one question on your plan. "
+                    "Check Messages if they asked you for anything."
+                ),
             }
         )
 

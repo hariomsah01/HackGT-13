@@ -80,6 +80,8 @@ class HuddleMessage(BaseModel):
     author_label: str
     text: str
     timestamp: str
+    to_id: Optional[str] = None  # doctor id, or None for whole care team
+    to_label: Optional[str] = None
 
 
 class CareRoom(BaseModel):
@@ -110,6 +112,8 @@ class LoginRequest(BaseModel):
 
 class MessageRequest(BaseModel):
     text: str
+    to_id: Optional[str] = None
+    to_label: Optional[str] = None
 
 
 class NoteRequest(BaseModel):

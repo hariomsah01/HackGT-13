@@ -251,27 +251,21 @@ class CareAgent:
         }
 
     def patient_plain(self, patient_id: str, question: str | None = None) -> str:
+        """Stable chart summary for the patient portal — never rewritten by Muse."""
         patient = self.store.get_patient(patient_id)
         if not patient:
             raise ValueError("Patient not found")
-        conditions = ", ".join(c.name for c in patient.conditions)
+        conditions = ", ".join(c.name for c in patient.conditions) or "none listed"
         meds = ", ".join(
             f"{p.name} ({p.dose})" for p in patient.prescriptions if p.status == "active"
+        ) or "none listed"
+        team = ", ".join(m.label for m in patient.team) or "your care team"
+        return (
+            f"You are {patient.label}, age {patient.age}.\n"
+            f"Your care team is {team}.\n"
+            f"Conditions on your chart: {conditions}.\n"
+            f"Active medicines: {meds}."
         )
-        team = ", ".join(m.label for m in patient.team)
-        fallback = (
-            f"{patient.label} is cared for by {team}. "
-            f"Known conditions: {conditions}. Current medicines: {meds}. "
-            "Your doctors already share this list, so you do not need to repeat your full history."
-        )
-        if not self.muse.enabled:
-            return fallback
-        text = self.muse.complete_text(
-            "Rewrite for a patient in warm plain language. No jargon. No mention of AI or models. 4-6 short sentences. Do not invent facts.",
-            f"Question: {question or 'What does my care team already know?'}\n"
-            f"Patient: {patient.label}, age {patient.age}\nConditions: {conditions}\nMedicines: {meds}\nTeam: {team}",
-        )
-        return text or fallback
 
     def _deterministic_brief(self, patient: Patient, room) -> dict[str, Any]:
         last = room.messages[-1].text if room and room.messages else ""
@@ -281,7 +275,7 @@ class CareAgent:
             "open_question": last[:120] if last else "Anything the team still needs from each other?",
             "owner": owner,
             "next_step": f"{owner} reviews the latest notes and confirms the plan with Doctor A",
-            "for_patient": "Your doctors are coordinating in one place — you should not need to re-explain your history.",
+            "for_patient": "Your doctors reviewed your chart together. You do not need to repeat your history at each visit.",
             "engine": "deterministic",
         }
         self.store.save_briefing(patient.id, briefing)
@@ -295,7 +289,7 @@ class CareAgent:
             "owner": data.get("owner") or "Doctor A",
             "next_step": data.get("next_step") or "Review the shared chart together",
             "for_patient": data.get("for_patient")
-            or "Your care team is talking so you do not have to repeat yourself.",
+            or "Your doctors reviewed your chart together. You do not need to repeat your history at each visit.",
         }
 
     def _parse_json_block(self, text: str) -> Optional[dict]:

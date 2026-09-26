@@ -53,7 +53,7 @@ PROFILES = [
         ],
         "treatments": [
             ("Heart failure pathway", "doctor_c", "Weight checks, salt limits, follow-up"),
-            ("Medication review", "doctor_a", "Keep the full list aligned across doctors"),
+            ("Medication review", "doctor_a", "Primary care confirms your full medicine list stays current."),
         ],
         "labs": [
             ("BNP", "220", "pg/mL"),
@@ -149,33 +149,12 @@ def generate_patient(index: int, seed: Optional[int] = None) -> Patient:
             value=value,
             unit=unit,
             ordered_by=rng.choice(["doctor_a", "doctor_b", "doctor_c", "doctor_d"]),
-            note="Shared with the full care team",
+            note="",
         )
         for i, (title, value, unit) in enumerate(profile["labs"])
     ]
 
-    notes = [
-        Note(
-            id="n1",
-            author_id="doctor_a",
-            author_label="Doctor A",
-            date=_ago(12),
-            text=(
-                f"Primary care visit. Active problems reviewed with the shared list. "
-                f"Care team includes Doctors A–D so specialists already see background history."
-            ),
-        ),
-        Note(
-            id="n2",
-            author_id="doctor_b" if profile["focus"] != "heart" else "doctor_c",
-            author_label="Doctor B" if profile["focus"] != "heart" else "Doctor C",
-            date=_ago(20),
-            text=(
-                "Specialist follow-up. Treatment plan updated in the common space. "
-                "No need for the patient to re-explain past conditions — they are already on the chart."
-            ),
-        ),
-    ]
+    notes = _patient_notes(profile["focus"])
 
     return Patient(
         id=f"patient_{index}",
@@ -188,4 +167,95 @@ def generate_patient(index: int, seed: Optional[int] = None) -> Patient:
         reports=reports,
         notes=notes,
         team=team,
+    )
+
+
+def _patient_notes(focus: str) -> list[Note]:
+    """Notes written so a patient can understand them. Same shape for every chart."""
+    if focus == "heart":
+        return [
+            Note(
+                id="n1",
+                author_id="doctor_a",
+                author_label="Doctor A",
+                date=_ago(12),
+                text=(
+                    "Primary care visit. We checked your blood pressure and reviewed "
+                    "your heart medicines. Continue them as written."
+                ),
+            ),
+            Note(
+                id="n2",
+                author_id="doctor_c",
+                author_label="Doctor C",
+                date=_ago(20),
+                text=(
+                    "Cardiology follow-up. Your heart rhythm and fluid plan look stable. "
+                    "Call us if you gain more than 2 pounds in a day."
+                ),
+            ),
+        ]
+    if focus == "spine":
+        return [
+            Note(
+                id="n1",
+                author_id="doctor_a",
+                author_label="Doctor A",
+                date=_ago(12),
+                text=(
+                    "Primary care visit. We reviewed your back and leg pain and your "
+                    "current pain medicine. Keep walking as tolerated."
+                ),
+            ),
+            Note(
+                id="n2",
+                author_id="doctor_b",
+                author_label="Doctor B",
+                date=_ago(20),
+                text=(
+                    "Specialist follow-up. Physical therapy is helping. Stay with the "
+                    "home exercises and ice after longer walks."
+                ),
+            ),
+        ]
+    # metabolic (default)
+    return [
+        Note(
+            id="n1",
+            author_id="doctor_a",
+            author_label="Doctor A",
+            date=_ago(12),
+            text=(
+                "Primary care visit. We reviewed your blood sugar and blood pressure. "
+                "Continue Metformin and Lisinopril as listed."
+            ),
+        ),
+        Note(
+            id="n2",
+            author_id="doctor_d",
+            author_label="Doctor D",
+            date=_ago(20),
+            text=(
+                "Kidney follow-up. Your kidney numbers are being watched closely. "
+                "Drink water as advised and keep your next lab appointment."
+            ),
+        ),
+    ]
+
+
+def patient_facing_message(focus: str) -> str:
+    """One clear room message a patient can understand."""
+    if focus == "heart":
+        return (
+            "I reviewed your heart medicines with Doctor A. "
+            "Your plan is unchanged. Weigh yourself each morning."
+        )
+    if focus == "spine":
+        return (
+            "I reviewed your pain plan with Doctor A. "
+            "Keep your therapy exercises. Message us if leg pain gets worse."
+        )
+    return (
+        "I reviewed your diabetes and kidney labs with Doctor A. "
+        "Keep taking your medicines as listed. Next labs are already ordered."
     )

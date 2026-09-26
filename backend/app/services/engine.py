@@ -4,14 +4,14 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from app.engines.auth import SessionUser
+from app.engines.auth import SessionUser, assert_chart_access
 from app.engines.care_agent import CareAgent
 from app.engines.care_signals import care_attention, handoff_pack
 from app.engines.connection_intel import connection_report
 from app.engines.gemini_copilot import ScreenAsk
 from app.engines.graph import build_care_graph
 from app.engines.muse import MuseClient
-from app.engines.patient_generator import generate_patient
+from app.engines.patient_generator import generate_patient, patient_facing_message
 from app.engines.rx_analysis import RxAnalyzer
 from app.models.schemas import Note, Patient, Prescription
 from app.services.store import CareStore
@@ -32,26 +32,39 @@ class CareEngine:
         idx = self.store.next_patient_index()
         patient = generate_patient(idx, seed=seed)
         self.store.save_patient(patient)
-        self.store.log(
-            "system",
-            "ClearPath",
+        self.store.save_briefing(
             patient.id,
-            "created",
-            f"{patient.label} joined the shared care space with Doctors A–D",
+            {
+                "issue": f"Care plan for {patient.label}",
+                "open_question": "Confirm next lab review with the team.",
+                "owner": patient.team[0].label if patient.team else "Doctor A",
+                "next_step": "Review shared notes and confirm the plan.",
+                "for_patient": "",
+                "engine": "seed",
+            },
         )
+        # One patient-facing message (same pattern for every chart)
+        if len(patient.team) >= 2:
+            focus = "metabolic"
+            names = " ".join(c.name.lower() for c in patient.conditions)
+            if "heart" in names or "fibrillation" in names:
+                focus = "heart"
+            elif "lumbar" in names or "radiculopathy" in names:
+                focus = "spine"
+            self.store.post_message(
+                patient.id,
+                patient.team[1].id,
+                patient.team[1].label,
+                patient_facing_message(focus),
+            )
         return patient
 
     def open_patient(self, patient_id: str, user: SessionUser) -> dict:
+        assert_chart_access(user, patient_id)
         patient = self.store.get_patient(patient_id)
         if not patient:
             raise ValueError("Patient not found")
-        self.store.log(
-            user.id,
-            user.label,
-            patient_id,
-            "viewed",
-            f"{user.label} opened the shared chart",
-        )
+        # Chart opens stay private — presence only, no activity feed noise
         presence = self.store.set_presence(
             patient_id, user.id, user.label, user.kind
         )
@@ -138,9 +151,12 @@ class CareEngine:
             "openai_rx_enabled": self.rx.enabled,
         }
 
-    def list_patients_enriched(self) -> list[dict]:
+    def list_patients_enriched(self, user: SessionUser | None = None) -> list[dict]:
+        patients = self.store.list_patients()
+        if user and user.kind == "patient" and user.chart_id:
+            patients = [p for p in patients if p.id == user.chart_id]
         out = []
-        for p in self.store.list_patients():
+        for p in patients:
             briefing = self.store.get_briefing(p.id)
             attn = care_attention(p, briefing)
             presence = self.store.get_presence(p.id)
@@ -273,8 +289,31 @@ class CareEngine:
         self.store.log(user.id, user.label, patient_id, "note", text[:80])
         return patient
 
-    def post_message(self, patient_id: str, user: SessionUser, text: str):
-        room = self.store.post_message(patient_id, user.id, user.label, text)
+    def post_message(
+        self,
+        patient_id: str,
+        user: SessionUser,
+        text: str,
+        to_id: str | None = None,
+        to_label: str | None = None,
+    ):
+        assert_chart_access(user, patient_id)
+        patient = self.store.get_patient(patient_id)
+        if not patient:
+            raise ValueError("Patient not found")
+        if to_id:
+            member = next((m for m in patient.team if m.id == to_id), None)
+            if not member:
+                raise ValueError("Doctor not on this care team")
+            to_label = member.label
+        room = self.store.post_message(
+            patient_id,
+            user.id,
+            user.label,
+            text,
+            to_id=to_id,
+            to_label=to_label,
+        )
         # Auto-refresh team briefing via Muse agent
         briefing = self.agent.brief_room(patient_id)
         return {"room": room.model_dump(), "briefing": briefing}
@@ -282,7 +321,9 @@ class CareEngine:
     def brief(self, patient_id: str) -> dict:
         return self.agent.brief_room(patient_id)
 
-    def patient_summary(self, patient_id: str, question: str | None = None) -> str:
+    def patient_summary(self, patient_id: str, question: str | None = None, user: SessionUser | None = None) -> str:
+        if user:
+            assert_chart_access(user, patient_id)
         return self.agent.patient_plain(patient_id, question)
 
     def ask_screen(

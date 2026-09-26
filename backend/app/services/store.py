@@ -69,7 +69,13 @@ class CareStore:
         return items[:limit]
 
     def post_message(
-        self, patient_id: str, author_id: str, author_label: str, text: str
+        self,
+        patient_id: str,
+        author_id: str,
+        author_label: str,
+        text: str,
+        to_id: Optional[str] = None,
+        to_label: Optional[str] = None,
     ) -> CareRoom:
         room = self.rooms.get(patient_id)
         if not room:
@@ -80,6 +86,8 @@ class CareStore:
             author_label=author_label,
             text=text,
             timestamp=datetime.utcnow().isoformat(),
+            to_id=to_id,
+            to_label=to_label,
         )
         room.messages.append(msg)
         room.updated_at = datetime.utcnow().isoformat()

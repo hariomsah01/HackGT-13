@@ -15,7 +15,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 
-from app.engines.auth import authenticate, list_users_public, verify_token
+from app.engines.auth import assert_chart_access, authenticate, list_users_public, verify_token
 from app.models.schemas import (
     AskRequest,
     LoginRequest,
@@ -75,8 +75,8 @@ def me(authorization: Optional[str] = Header(default=None)):
 
 @router.get("/patients")
 def list_patients(request: Request, authorization: Optional[str] = Header(default=None)):
-    user_from(authorization)
-    return eng(request).list_patients_enriched()
+    user = user_from(authorization)
+    return eng(request).list_patients_enriched(user)
 
 
 @router.post("/patients")
@@ -104,6 +104,8 @@ def get_patient(
     e = eng(request)
     try:
         return e.open_patient(patient_id, user)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
 
@@ -118,7 +120,15 @@ def post_message(
     user = user_from(authorization)
     e = eng(request)
     try:
-        return e.post_message(patient_id, user, body.text.strip())
+        return e.post_message(
+            patient_id,
+            user,
+            body.text.strip(),
+            to_id=body.to_id,
+            to_label=body.to_label,
+        )
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
 
@@ -174,17 +184,33 @@ async def capture_visit(
         raise HTTPException(400, str(exc)) from exc
 
 
+# Chart opens / Ask probes stay out of patient-facing feeds
+_PRIVATE_ACTIVITY = frozenset({"viewed", "ask"})
+_PATIENT_ACTIVITY = frozenset({"message", "note", "rx_add", "rx_analyze", "visit", "brief"})
+
+
 @router.get("/activity")
 def activity(
     request: Request,
     patient_id: Optional[str] = None,
     authorization: Optional[str] = Header(default=None),
 ):
-    user_from(authorization)
-    return [
-        a.model_dump()
-        for a in eng(request).store.activity_feed(patient_id=patient_id)
-    ]
+    user = user_from(authorization)
+    e = eng(request)
+    if user.kind == "patient":
+        patient_id = user.chart_id
+        if not patient_id:
+            return []
+    elif patient_id:
+        try:
+            assert_chart_access(user, patient_id)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+    items = e.store.activity_feed(patient_id=patient_id, limit=60)
+    items = [a for a in items if a.kind not in _PRIVATE_ACTIVITY]
+    if user.kind == "patient":
+        items = [a for a in items if a.kind in _PATIENT_ACTIVITY]
+    return [a.model_dump() for a in items[:40]]
 
 
 @router.get("/analytics")
@@ -202,10 +228,12 @@ def summary(
     request: Request,
     authorization: Optional[str] = Header(default=None),
 ):
-    user_from(authorization)
+    user = user_from(authorization)
     e = eng(request)
     try:
-        text = e.patient_summary(patient_id, body.question)
+        text = e.patient_summary(patient_id, body.question, user=user)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
     return {"text": text}
@@ -234,10 +262,14 @@ def handoffs(
     request: Request, authorization: Optional[str] = Header(default=None)
 ):
     """Open questions + attention across the shared care space."""
-    user_from(authorization)
-    analytics = eng(request).analytics()
+    user = user_from(authorization)
+    e = eng(request)
+    analytics = e.analytics()
+    packs = analytics.get("handoffs") or []
+    if user.kind == "patient" and user.chart_id:
+        packs = [h for h in packs if h.get("patient_id") == user.chart_id]
     return {
-        "handoffs": analytics.get("handoffs") or [],
+        "handoffs": packs,
         "attention_counts": analytics.get("attention_counts") or {},
         "updated_at": analytics.get("updated_at"),
     }
@@ -328,6 +360,12 @@ async def room_socket(websocket: WebSocket, patient_id: str):
         return
 
     engine = websocket.app.state.engine
+    try:
+        assert_chart_access(user, patient_id)
+    except PermissionError:
+        await websocket.close(code=4403)
+        return
+
     await hub.join(patient_id, websocket)
     presence = engine.store.set_presence(patient_id, user.id, user.label, user.kind)
     await hub.broadcast(
