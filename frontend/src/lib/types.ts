@@ -70,6 +70,12 @@ export interface Patient {
   label: string;
   display_name: string;
   age: number;
+  phone?: string;
+  email?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
   conditions: Condition[];
   prescriptions: Prescription[];
   treatments: Treatment[];
@@ -244,8 +250,41 @@ export interface RxAnalysis {
   };
   engine?: string;
   openai?: boolean;
+  online?: boolean;
+  online_sources?: string[];
   patient_id?: string;
   error?: string;
+}
+
+export interface OfficeCall {
+  id: string;
+  patient_id: string;
+  patient_label: string;
+  doctor_id: string;
+  doctor_label: string;
+  reason: string;
+  transcript: string;
+  insight: string;
+  topic: string;
+  needs_callback: boolean;
+  status: "new" | "read" | "responded";
+  assistant_label: string;
+  source: string;
+  created_at: string;
+  read_at?: string | null;
+}
+
+export interface DoctorNotification {
+  id: string;
+  doctor_id: string;
+  kind: string;
+  title: string;
+  detail: string;
+  patient_id: string;
+  patient_label: string;
+  call_id?: string | null;
+  read: boolean;
+  created_at: string;
 }
 
 export interface PatientBundle {
@@ -261,6 +300,7 @@ export interface PatientBundle {
   attention?: Attention;
   handoff?: HandoffPack;
   team_activity?: TeamActivity[];
+  office_calls?: OfficeCall[];
   muse?: { enabled: boolean };
   openai_rx?: { enabled: boolean };
 }

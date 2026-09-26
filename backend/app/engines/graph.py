@@ -11,13 +11,26 @@ def build_care_graph(patient: Patient) -> dict:
             "label": patient.label,
             "type": "patient",
             "status": "active",
+            "meta": {
+                "age": str(patient.age),
+                "city": patient.city or "",
+                "phone": patient.phone or "",
+            },
         }
     ]
     edges = []
 
     for c in patient.conditions:
         nid = f"cond_{c.id}"
-        nodes.append({"id": nid, "label": c.name, "type": "condition", "status": "ok"})
+        nodes.append(
+            {
+                "id": nid,
+                "label": c.name,
+                "type": "condition",
+                "status": "ok",
+                "meta": {"note": c.note or "", "since": c.since or ""},
+            }
+        )
         edges.append(
             {"id": f"e_{patient.id}_{nid}", "source": patient.id, "target": nid, "label": "has"}
         )
@@ -41,11 +54,22 @@ def build_care_graph(patient: Patient) -> dict:
             }
         )
 
+    doctor_labels = {m.id: m.label for m in patient.team}
     for rx in patient.prescriptions:
         if rx.status != "active":
             continue
         nodes.append(
-            {"id": rx.id, "label": rx.name, "type": "prescription", "status": "ok"}
+            {
+                "id": rx.id,
+                "label": rx.name,
+                "type": "prescription",
+                "status": "ok",
+                "meta": {
+                    "dose": rx.dose or "",
+                    "reason": rx.reason or "",
+                    "prescribed_by": doctor_labels.get(rx.prescribed_by, rx.prescribed_by),
+                },
+            }
         )
         edges.append(
             {

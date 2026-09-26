@@ -13,7 +13,7 @@ from app.engines.graph import build_care_graph
 from app.engines.muse import MuseClient
 from app.engines.patient_generator import generate_patient, patient_facing_message
 from app.engines.rx_analysis import RxAnalyzer
-from app.models.schemas import Note, Patient, Prescription
+from app.models.schemas import DoctorNotification, Note, OfficeCall, Patient, Prescription
 from app.services.store import CareStore
 
 
@@ -36,7 +36,7 @@ class CareEngine:
             patient.id,
             {
                 "issue": f"Care plan for {patient.label}",
-                "open_question": "Confirm next lab review with the team.",
+                "open_question": "",
                 "owner": patient.team[0].label if patient.team else "Doctor A",
                 "next_step": "Review shared notes and confirm the plan.",
                 "for_patient": "",
@@ -84,6 +84,9 @@ class CareEngine:
             "attention": handoff["attention"],
             "handoff": handoff,
             "team_activity": handoff["team_activity"],
+            "office_calls": [
+                c.model_dump() for c in self.store.list_office_calls(patient_id)
+            ],
             "muse": {"enabled": self.muse.enabled},
             "openai_rx": {"enabled": self.rx.enabled},
         }
@@ -127,8 +130,7 @@ class CareEngine:
         handoffs = [
             handoff_pack(p, self.store, self.store.get_briefing(p.id))
             for p in patients
-            if (self.store.get_briefing(p.id) or {}).get("open_question")
-            or care_attention(p, self.store.get_briefing(p.id))["level"] != "clear"
+            if care_attention(p, self.store.get_briefing(p.id))["level"] != "clear"
         ]
         return {
             "updated_at": datetime.utcnow().isoformat(),
@@ -249,7 +251,7 @@ class CareEngine:
             "rx_add",
             f"{user.label} added {rx.name} ({rx.dose}) to the shared chart{sev_bit}",
         )
-        # Soft open question for the team when severity was elevated
+        # Team follow-up when severity was elevated
         if analysis_severity in ("caution", "avoid", "review"):
             self.store.add_task(
                 patient_id,
@@ -267,6 +269,50 @@ class CareEngine:
             "patient": patient.model_dump(),
             "prescription": rx.model_dump(),
             "attention": care_attention(patient, self.store.get_briefing(patient_id)),
+        }
+
+    def stop_prescription(
+        self,
+        patient_id: str,
+        user: SessionUser,
+        rx_id: str,
+        reason: str = "",
+    ) -> dict:
+        """Prescribing doctor can stop a medicine when the course is complete."""
+        if user.kind != "doctor":
+            raise ValueError("Only doctors can remove prescriptions")
+        patient = self.store.get_patient(patient_id)
+        if not patient:
+            raise ValueError("Patient not found")
+        rx = next((p for p in patient.prescriptions if p.id == rx_id), None)
+        if not rx:
+            raise ValueError("Medicine not found")
+        if rx.prescribed_by != user.id:
+            raise ValueError(
+                "Only the doctor who prescribed this medicine can remove it"
+            )
+        if rx.status != "active":
+            raise ValueError("This medicine is already stopped")
+        rx.status = "stopped"
+        rx.stopped = datetime.utcnow().date().isoformat()
+        note = (reason or "").strip() or "Course completed"
+        if note and note.lower() not in (rx.reason or "").lower():
+            rx.reason = f"{rx.reason} · Stopped: {note}".strip(" ·") if rx.reason else note
+        self.store.save_patient(patient)
+        self.store.log(
+            user.id,
+            user.label,
+            patient_id,
+            "rx_stop",
+            f"{user.label} stopped {rx.name} ({rx.dose}) — {note}",
+        )
+        return {
+            "patient": patient.model_dump(),
+            "prescription": rx.model_dump(),
+            "graph": build_care_graph(patient),
+            "snapshot": self._snapshot(patient),
+            "attention": care_attention(patient, self.store.get_briefing(patient_id)),
+            "connections": connection_report(patient, self.store.get_room(patient_id)),
         }
 
     def add_note(self, patient_id: str, user: SessionUser, text: str) -> Patient:
@@ -301,11 +347,23 @@ class CareEngine:
         patient = self.store.get_patient(patient_id)
         if not patient:
             raise ValueError("Patient not found")
+
+        # Private thread = patient ↔ one doctor (not the whole care team)
+        is_private = False
         if to_id:
-            member = next((m for m in patient.team if m.id == to_id), None)
-            if not member:
-                raise ValueError("Doctor not on this care team")
-            to_label = member.label
+            if to_id == patient.id:
+                if user.kind != "doctor":
+                    raise ValueError("Only doctors can send a private reply to the patient")
+                to_label = patient.label
+                is_private = True
+            else:
+                member = next((m for m in patient.team if m.id == to_id), None)
+                if not member:
+                    raise ValueError("Recipient is not on this care team")
+                to_label = member.label
+                # Patient → specific doctor is private; doctor → doctor stays team-visible
+                is_private = user.kind == "patient"
+
         room = self.store.post_message(
             patient_id,
             user.id,
@@ -314,9 +372,15 @@ class CareEngine:
             to_id=to_id,
             to_label=to_label,
         )
-        # Auto-refresh team briefing via Muse agent
-        briefing = self.agent.brief_room(patient_id)
-        return {"room": room.model_dump(), "briefing": briefing}
+        if is_private:
+            briefing = self.store.get_briefing(patient_id) or {}
+        else:
+            briefing = self.agent.brief_room(patient_id)
+        return {
+            "room": room.model_dump(),
+            "briefing": briefing,
+            "private": is_private,
+        }
 
     def brief(self, patient_id: str) -> dict:
         return self.agent.brief_room(patient_id)
@@ -405,32 +469,154 @@ class CareEngine:
     def capture_visit(
         self, patient_id: str, doctor: SessionUser, wav_bytes: bytes | None, demo: bool = False
     ) -> dict:
-        if demo or not wav_bytes:
-            tr = self.muse.transcribe_wav(b"")  # demo path inside client when empty+no key
-            # Force demo transcript when no bytes
-            if not wav_bytes:
-                transcript = (
-                    "Patient reports morning glucose has been higher. Feeling more tired. "
-                    f"{doctor.label} will share the log with Doctor B and ask Doctor D to confirm kidney labs."
-                )
-            else:
-                transcript = tr.get("transcript") or ""
-            meta = {"source": tr.get("source", "demo"), "audioDurationMs": tr.get("audioDurationMs")}
+        """Deprecated path — prefer record_office_call."""
+        return self.record_office_call(
+            patient_id=patient_id,
+            actor=doctor,
+            doctor_id=doctor.id,
+            reason="In-clinic follow-up",
+            wav_bytes=wav_bytes,
+            demo=demo or not wav_bytes,
+        )
+
+    def record_office_call(
+        self,
+        patient_id: str,
+        actor: SessionUser,
+        doctor_id: str,
+        reason: str = "",
+        wav_bytes: bytes | None = None,
+        demo: bool = True,
+        transcript_override: str | None = None,
+    ) -> dict:
+        """Patient (or demo) calls a doctor's office; health assistant intake → doctor alert."""
+        assert_chart_access(actor, patient_id)
+        patient = self.store.get_patient(patient_id)
+        if not patient:
+            raise ValueError("Patient not found")
+        member = next((m for m in patient.team if m.id == doctor_id), None)
+        if not member:
+            raise ValueError("Doctor not on this care team")
+
+        if transcript_override and transcript_override.strip():
+            transcript = transcript_override.strip()
+            meta = {"source": "typed", "audioDurationMs": 0}
+        elif demo or not wav_bytes:
+            patient_line = reason.strip() or (
+                "I have been feeling more tired and my morning glucose looks higher. "
+                "I also want to schedule a checkup when the doctor is free."
+            )
+            transcript = (
+                f"Office assistant: Thank you for calling {member.label}'s office, "
+                f"this is Sam. How can I help you today?\n"
+                f"{patient.label}: {patient_line}\n"
+                f"Office assistant: I will note that for {member.label} and ask them to "
+                f"call you back about your symptoms and appointment. Is there anything else?\n"
+                f"{patient.label}: That is all, thank you.\n"
+                f"Office assistant: You are welcome. {member.label} will follow up with you."
+            )
+            meta = {"source": "demo", "audioDurationMs": 0}
         else:
             tr = self.muse.transcribe_wav(wav_bytes)
             transcript = tr.get("transcript") or ""
             meta = {
-                "source": tr.get("source"),
+                "source": tr.get("source") or "muse_voice",
                 "audioDurationMs": tr.get("audioDurationMs"),
                 "error": tr.get("error"),
             }
         if not transcript:
-            raise ValueError("Could not transcribe visit audio")
-        structured = self.agent.structure_visit(patient_id, transcript, doctor)
-        briefing = self.agent.brief_room(patient_id)
+            if meta.get("error"):
+                raise ValueError(f"Muse Voice could not transcribe the call: {meta['error']}")
+            raise ValueError(
+                "Muse Voice heard no speech in the recording — speak for a few seconds and try again"
+            )
+
+        structured = self.agent.structure_office_call(
+            patient_id, transcript, member.label, reason
+        )
+        call = OfficeCall(
+            id=f"call_{uuid4().hex[:8]}",
+            patient_id=patient.id,
+            patient_label=patient.label,
+            doctor_id=member.id,
+            doctor_label=member.label,
+            reason=reason.strip() or structured["topic"],
+            transcript=transcript,
+            insight=structured["insight"],
+            topic=structured["topic"],
+            needs_callback=structured["needs_callback"],
+            status="new",
+            assistant_label="Office assistant (Sam)",
+            source=str(meta.get("source") or "demo"),
+        )
+        self.store.save_office_call(call)
+
+        note = DoctorNotification(
+            id=f"notif_{uuid4().hex[:8]}",
+            doctor_id=member.id,
+            kind="office_call",
+            title=f"{patient.label} called your office",
+            detail=call.insight,
+            patient_id=patient.id,
+            patient_label=patient.label,
+            call_id=call.id,
+            read=False,
+        )
+        self.store.add_notification(note)
+
+        self.store.log(
+            actor.id,
+            actor.label,
+            patient_id,
+            "office_call",
+            f"{patient.label} called {member.label}'s office — {call.topic}",
+        )
+
+        # Seed a private thread cue so the doctor can reply in Patient private
+        self.store.post_message(
+            patient_id,
+            "system",
+            "Office assistant",
+            f"Call summary for {member.label}: {call.insight}",
+            to_id=member.id,
+            to_label=member.label,
+        )
+
         return {
+            "call": call.model_dump(),
+            "notification": note.model_dump(),
             "transcript": transcript,
             "transcription": meta,
             "structured": structured,
-            "briefing": briefing,
+            "office_calls": [c.model_dump() for c in self.store.list_office_calls(patient_id)],
         }
+
+    def list_doctor_notifications(self, user: SessionUser) -> dict:
+        if user.kind != "doctor":
+            raise ValueError("Only doctors have office-call notifications")
+        notes = self.store.list_notifications(user.id)
+        return {
+            "notifications": [n.model_dump() for n in notes],
+            "unread": sum(1 for n in notes if not n.read),
+        }
+
+    def mark_notification_read(self, user: SessionUser, note_id: str) -> dict:
+        if user.kind != "doctor":
+            raise ValueError("Only doctors can update notifications")
+        note = self.store.mark_notification_read(user.id, note_id)
+        if not note:
+            raise ValueError("Notification not found")
+        if note.call_id:
+            self.store.mark_office_call_status(note.call_id, "read")
+        return {"notification": note.model_dump()}
+
+    def mark_office_call_responded(self, user: SessionUser, call_id: str) -> dict:
+        call = self.store.get_office_call(call_id)
+        if not call:
+            raise ValueError("Office call not found")
+        if user.kind == "doctor" and call.doctor_id != user.id:
+            raise ValueError("This call was for another doctor's office")
+        assert_chart_access(user, call.patient_id)
+        updated = self.store.mark_office_call_status(call_id, "responded")
+        return {"call": updated.model_dump() if updated else None}
+

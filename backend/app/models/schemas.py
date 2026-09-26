@@ -65,6 +65,12 @@ class Patient(BaseModel):
     label: str  # Patient 1
     display_name: str  # kept internal for notes; UI shows label
     age: int
+    phone: str = ""
+    email: str = ""
+    address: str = ""
+    city: str = ""
+    state: str = "GA"
+    zip: str = ""
     conditions: list[Condition] = Field(default_factory=list)
     prescriptions: list[Prescription] = Field(default_factory=list)
     treatments: list[Treatment] = Field(default_factory=list)
@@ -144,3 +150,49 @@ class RxAddRequest(BaseModel):
     frequency: str = ""
     reason: str = ""
     analysis_severity: Optional[str] = None
+
+
+class RxStopRequest(BaseModel):
+    """Prescribing doctor stops a medicine when the course is complete."""
+
+    reason: str = "Course completed"
+
+
+class OfficeCall(BaseModel):
+    """Health-assistant phone intake when the doctor cannot take the call live."""
+
+    id: str
+    patient_id: str
+    patient_label: str
+    doctor_id: str
+    doctor_label: str
+    reason: str = ""
+    transcript: str
+    insight: str  # short message for the doctor
+    topic: str = ""
+    needs_callback: bool = True
+    status: Literal["new", "read", "responded"] = "new"
+    assistant_label: str = "Office assistant"
+    source: str = "demo"
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    read_at: Optional[str] = None
+
+
+class DoctorNotification(BaseModel):
+    id: str
+    doctor_id: str
+    kind: str  # office_call
+    title: str
+    detail: str
+    patient_id: str
+    patient_label: str
+    call_id: Optional[str] = None
+    read: bool = False
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
+
+class OfficeCallRequest(BaseModel):
+    doctor_id: str
+    reason: str = ""
+    demo: bool = True
+    transcript: Optional[str] = None

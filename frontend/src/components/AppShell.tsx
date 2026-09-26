@@ -1,15 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { AskScreenProvider } from "@/lib/askScreen";
 import { GlobalAsk } from "@/components/GlobalAsk";
+import type { DoctorNotification } from "@/lib/types";
 
 const doctorTabs = [
-  { href: "/app/patients", label: "Patients", hint: "Shared rooms" },
-  { href: "/app/insights", label: "Insights", hint: "Live totals" },
-  { href: "/app/updates", label: "Updates", hint: "Team activity" },
+  { href: "/app/patients", label: "Patients", hint: "Your charts" },
+  { href: "/app/insights", label: "Insights", hint: "Live overview" },
+  { href: "/app/updates", label: "Updates", hint: "Team handoffs" },
 ];
 
 const patientTabs = [
@@ -47,11 +50,43 @@ export function Logo({ compact = false }: { compact?: boolean }) {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { user, logout, ready } = useAuth();
+  const { user, token, logout, ready } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const tabs = user?.kind === "patient" ? patientTabs : doctorTabs;
   const inApp = pathname.startsWith("/app") && !!user;
+  const [notes, setNotes] = useState<DoctorNotification[]>([]);
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    if (!token || user?.kind !== "doctor") return;
+    let cancelled = false;
+    const load = () => {
+      api
+        .notifications(token)
+        .then((r) => {
+          if (cancelled) return;
+          const fresh = (r.notifications || []).filter((n) => !n.read);
+          setNotes(fresh);
+          setUnread(fresh.length);
+        })
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [token, user?.kind]);
+
+  async function openNote(n: DoctorNotification) {
+    if (!token) return;
+    setNotes((prev) => prev.filter((x) => x.id !== n.id));
+    setUnread((u) => Math.max(0, u - 1));
+    router.push(`/app/patients/${n.patient_id}?tab=Calls`);
+    api.readNotification(n.id, token).catch(() => {});
+  }
 
   if (!ready) {
     return (
@@ -71,7 +106,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Mark light />
               <div>
                 <p className="font-display text-lg font-bold tracking-tight">ClearPath</p>
-                <p className="text-[11px] text-[var(--sidebar-muted)]">Care workspace</p>
+                <p className="text-[11px] text-[var(--sidebar-muted)]">Shared care</p>
               </div>
             </div>
             <nav className="mt-1 flex flex-1 flex-col gap-1 px-3">
@@ -91,6 +126,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 );
               })}
             </nav>
+            {user?.kind === "doctor" && (
+              <div className="mx-3 mb-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--sidebar-muted)]">
+                    Office calls
+                  </p>
+                  {unread > 0 && (
+                    <span className="rounded-full bg-teal-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900">
+                      {unread}
+                    </span>
+                  )}
+                </div>
+                <ul className="mt-2 max-h-44 space-y-2 overflow-y-auto">
+                  {notes.slice(0, 5).map((n) => (
+                    <li key={n.id}>
+                      <button
+                        type="button"
+                        onClick={() => openNote(n)}
+                        className="w-full rounded-lg px-2 py-1.5 text-left text-xs text-white transition hover:bg-white/10"
+                      >
+                        <p className="font-semibold">{n.title}</p>
+                        <p className="mt-0.5 line-clamp-2 opacity-80">{n.detail}</p>
+                      </button>
+                    </li>
+                  ))}
+                  {!notes.length && (
+                    <li className="px-1 text-[11px] text-[var(--sidebar-muted)]">
+                      No new office calls.
+                    </li>
+                  )}
+                </ul>
+              </div>
+            )}
             <div className="mt-auto border-t border-white/10 p-4">
               <div className="flex items-center gap-3">
                 <span

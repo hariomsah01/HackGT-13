@@ -39,68 +39,66 @@ export default function InsightsPage() {
   }, [token]);
 
   if (!data) {
-    return <main className="workspace text-[var(--muted)]">Loading insights…</main>;
+    return (
+      <main className="workspace text-[var(--muted)]">Loading insights…</main>
+    );
   }
+
+  const metrics = [
+    { label: "Patients", value: data.totals.patients },
+    { label: "Conditions", value: data.totals.conditions },
+    { label: "Medicines", value: data.totals.active_prescriptions },
+    { label: "Team links", value: data.totals.team_links },
+    { label: "Avg bond", value: data.totals.avg_bond ?? "—" },
+  ];
 
   return (
     <main className="workspace w-full">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h1 className="font-display text-3xl font-bold tracking-tight xl:text-4xl">
-            Insights
-          </h1>
-          <p className="mt-1 text-[var(--muted)]">
-            Live care-space totals · {new Date(data.updated_at).toLocaleTimeString()}
-          </p>
-        </div>
-      </div>
+      <h1 className="font-display text-[clamp(2.25rem,4vw,3.5rem)] font-extrabold leading-[0.95] tracking-tight text-[var(--ink)]">
+        Care insights
+      </h1>
+      <p className="mt-2 text-[clamp(1rem,1.15vw,1.15rem)] text-[var(--muted)]">
+        Live totals as of {new Date(data.updated_at).toLocaleTimeString()}
+      </p>
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {[
-          ["Patients", data.totals.patients],
-          ["Conditions", data.totals.conditions],
-          ["Active medicines", data.totals.active_prescriptions],
-          ["Team links", data.totals.team_links],
-          ["Avg bond", data.totals.avg_bond ?? "—"],
-          ["Needs attention", data.totals.needs_attention ?? 0],
-        ].map(([k, v]) => (
-          <div key={String(k)} className="card p-5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-              {k}
+      <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+        {metrics.map((m) => (
+          <div
+            key={m.label}
+            className="rounded-[1.25rem] border border-[var(--line)] bg-white px-4 py-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)]"
+          >
+            <p className="text-sm text-[var(--muted)]">{m.label}</p>
+            <p className="font-display mt-1 text-3xl font-extrabold tracking-tight text-[var(--ink)]">
+              {m.value}
             </p>
-            <p className="font-display mt-2 text-4xl font-bold tracking-tight">{v}</p>
           </div>
         ))}
       </div>
 
-      <div className="mt-8 grid gap-6 xl:grid-cols-5">
-        <section className="card p-5 xl:col-span-3">
-          <h2 className="font-display text-lg font-bold">Per patient</h2>
+      <div className="mt-6 grid gap-5 lg:grid-cols-12">
+        <section className="rounded-[1.75rem] border border-[var(--line)] bg-white p-[clamp(1.25rem,2vw,2rem)] shadow-[0_16px_40px_rgba(15,23,42,0.05)] lg:col-span-7">
+          <h2 className="font-display text-[clamp(1.35rem,1.8vw,1.85rem)] font-bold tracking-tight">
+            Per patient
+          </h2>
           <div className="mt-5 space-y-5">
             {data.patients.map((p) => {
               const meds = Number(p.active_prescriptions || 0);
               const bond = Number(p.bond_score || 0);
-              const attn = p.attention as { badge?: string; level?: string } | undefined;
               return (
                 <Link
                   key={String(p.patient_id)}
                   href={`/app/patients/${p.patient_id}`}
-                  className="block"
+                  className="block rounded-2xl bg-[var(--paper)] px-4 py-3 transition hover:bg-teal-50/50"
                 >
-                  <div className="mb-1.5 flex justify-between gap-3 text-sm">
-                    <span className="font-semibold">
+                  <div className="mb-2 flex justify-between gap-3 text-sm">
+                    <span className="font-semibold text-[var(--ink)]">
                       {String(p.label)}
-                      {attn?.badge && attn.level !== "clear" && (
-                        <span className="ml-2 text-[10px] font-bold uppercase text-amber-800">
-                          {attn.badge}
-                        </span>
-                      )}
                     </span>
                     <span className="text-[var(--muted)]">
-                      bond {bond} · {meds} meds
+                      Bond {bond}, {meds} meds
                     </span>
                   </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-2 overflow-hidden rounded-full bg-white">
                     <div
                       className="h-full rounded-full bg-[var(--brand)] transition-all duration-500"
                       style={{ width: `${Math.min(100, bond)}%` }}
@@ -112,19 +110,30 @@ export default function InsightsPage() {
           </div>
         </section>
 
-        <section className="card p-5 xl:col-span-2">
-          <h2 className="font-display text-lg font-bold">Live feed</h2>
-          <ul className="mt-4 max-h-[28rem] space-y-0 overflow-y-auto text-sm">
-            {data.activity.map((a) => (
-              <li key={a.id} className="border-b border-[var(--line)] py-3 last:border-0">
-                <span className="text-xs text-[var(--muted)]">
-                  {new Date(a.timestamp).toLocaleTimeString()}
-                </span>
-                <p className="mt-0.5">
-                  <strong>{a.actor_label}</strong> — {a.detail}
-                </p>
-              </li>
-            ))}
+        <section className="rounded-[1.75rem] border border-[var(--line)] bg-white p-[clamp(1.25rem,2vw,2rem)] shadow-[0_16px_40px_rgba(15,23,42,0.05)] lg:col-span-5">
+          <h2 className="font-display text-[clamp(1.35rem,1.8vw,1.85rem)] font-bold tracking-tight">
+            Recent activity
+          </h2>
+          <ul className="mt-5 max-h-[28rem] space-y-0 overflow-y-auto">
+            {data.activity
+              .filter((a) => a.kind !== "viewed" && a.kind !== "ask")
+              .map((a) => (
+                <li
+                  key={a.id}
+                  className="border-b border-[var(--line)] py-3 last:border-0"
+                >
+                  <span className="text-xs text-[var(--muted)]">
+                    {new Date(a.timestamp).toLocaleTimeString()}
+                  </span>
+                  <p className="mt-0.5 text-sm leading-relaxed text-[var(--ink)]">
+                    <span className="font-semibold">{a.actor_label}</span>{" "}
+                    {a.detail}
+                  </p>
+                </li>
+              ))}
+            {!data.activity.length && (
+              <li className="py-6 text-sm text-[var(--muted)]">Quiet for now.</li>
+            )}
           </ul>
         </section>
       </div>

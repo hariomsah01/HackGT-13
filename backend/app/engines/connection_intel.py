@@ -37,26 +37,8 @@ def connection_report(patient: Patient, room: CareRoom | None) -> dict[str, Any]
                 strength[msg.author_id] += 6
                 reasons[msg.author_id].append("Active in team room")
 
-    # Cross-doctor links when meds/treatments span specialties
-    bridges = []
-    prescribers = {rx.prescribed_by for rx in patient.prescriptions if rx.status == "active"}
-    if len(prescribers) >= 2:
-        bridges.append(
-            {
-                "type": "shared_medicines",
-                "doctors": sorted(prescribers),
-                "why": "More than one doctor is prescribing — keep the list reconciled.",
-            }
-        )
-    leaders = {tx.led_by for tx in patient.treatments if tx.status == "active"}
-    if leaders and prescribers - leaders:
-        bridges.append(
-            {
-                "type": "treatment_overlap",
-                "doctors": sorted(leaders | prescribers),
-                "why": "Treatment owners and prescribing doctors should stay aligned.",
-            }
-        )
+    # Cross-doctor bridge tips removed — keep scoring only
+    bridges: list[dict[str, Any]] = []
 
     members = []
     for m in patient.team:

@@ -19,6 +19,12 @@ from app.models.schemas import (
 PROFILES = [
     {
         "focus": "metabolic",
+        "phone": "(404) 555-0142",
+        "email": "patient1.care@clearpath.demo",
+        "address": "1180 Peachtree St NE, Apt 4B",
+        "city": "Atlanta",
+        "state": "GA",
+        "zip": "30309",
         "conditions": [
             ("Type 2 diabetes", "Ongoing blood sugar management"),
             ("High blood pressure", "Monitored by primary care and cardiology"),
@@ -41,6 +47,12 @@ PROFILES = [
     },
     {
         "focus": "heart",
+        "phone": "(404) 555-0198",
+        "email": "patient2.care@clearpath.demo",
+        "address": "245 Northside Dr NW",
+        "city": "Atlanta",
+        "state": "GA",
+        "zip": "30313",
         "conditions": [
             ("Heart failure", "Managed with cardiology"),
             ("Atrial fibrillation", "Rhythm and stroke-risk care"),
@@ -63,6 +75,12 @@ PROFILES = [
     },
     {
         "focus": "spine",
+        "phone": "(678) 555-0164",
+        "email": "patient3.care@clearpath.demo",
+        "address": "88 Decatur St SE, Unit 12",
+        "city": "Atlanta",
+        "state": "GA",
+        "zip": "30303",
         "conditions": [
             ("Lumbar radiculopathy", "Back and leg nerve pain"),
             ("Obesity", "Weight management support"),
@@ -161,6 +179,12 @@ def generate_patient(index: int, seed: Optional[int] = None) -> Patient:
         label=f"Patient {index}",
         display_name=f"Patient {index}",
         age=rng.randint(48, 72),
+        phone=str(profile.get("phone") or ""),
+        email=str(profile.get("email") or ""),
+        address=str(profile.get("address") or ""),
+        city=str(profile.get("city") or "Atlanta"),
+        state=str(profile.get("state") or "GA"),
+        zip=str(profile.get("zip") or ""),
         conditions=conditions,
         prescriptions=prescriptions,
         treatments=treatments,
@@ -257,5 +281,5 @@ def patient_facing_message(focus: str) -> str:
         )
     return (
         "I reviewed your diabetes and kidney labs with Doctor A. "
-        "Keep taking your medicines as listed. Next labs are already ordered."
+        "Keep taking your medicine as listed. Next labs are already ordered."
     )

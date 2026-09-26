@@ -74,12 +74,64 @@ export const api = {
     if (file) fd.append("audio", file, "visit.wav");
     fd.append("demo", file ? "false" : "true");
     return req<{
+      call: import("./types").OfficeCall;
       transcript: string;
       structured: Record<string, unknown>;
-      briefing: import("./types").Briefing;
       transcription: Record<string, unknown>;
+      office_calls: import("./types").OfficeCall[];
     }>(`/api/patients/${id}/visit`, { method: "POST", token, body: fd });
   },
+  officeCall: (
+    id: string,
+    body: { doctor_id: string; reason?: string; demo?: boolean; transcript?: string },
+    token: string
+  ) =>
+    req<{
+      call: import("./types").OfficeCall;
+      notification: import("./types").DoctorNotification;
+      transcript: string;
+      structured: Record<string, unknown>;
+      office_calls: import("./types").OfficeCall[];
+    }>(`/api/patients/${id}/office-call`, {
+      method: "POST",
+      token,
+      body: JSON.stringify(body),
+    }),
+  officeCallAudio: (
+    id: string,
+    body: { doctor_id: string; reason?: string },
+    audio: Blob,
+    token: string
+  ) => {
+    const fd = new FormData();
+    fd.append("audio", audio, "office-call.wav");
+    fd.append("doctor_id", body.doctor_id);
+    fd.append("reason", body.reason || "");
+    fd.append("demo", "false");
+    return req<{
+      call: import("./types").OfficeCall;
+      notification: import("./types").DoctorNotification;
+      transcript: string;
+      transcription: { source?: string; audioDurationMs?: number; error?: string };
+      structured: Record<string, unknown>;
+      office_calls: import("./types").OfficeCall[];
+    }>(`/api/patients/${id}/office-call`, { method: "POST", token, body: fd });
+  },
+  notifications: (token: string) =>
+    req<{
+      notifications: import("./types").DoctorNotification[];
+      unread: number;
+    }>("/api/notifications", { token }),
+  readNotification: (noteId: string, token: string) =>
+    req<{ notification: import("./types").DoctorNotification }>(
+      `/api/notifications/${noteId}/read`,
+      { method: "POST", token }
+    ),
+  markCallResponded: (callId: string, token: string) =>
+    req<{ call: import("./types").OfficeCall | null }>(
+      `/api/office-calls/${callId}/responded`,
+      { method: "POST", token }
+    ),
   activity: (token: string, patientId?: string) =>
     req<import("./types").ActivityEvent[]>(
       patientId ? `/api/activity?patient_id=${patientId}` : "/api/activity",
@@ -141,6 +193,24 @@ export const api = {
       method: "POST",
       token,
       body: JSON.stringify(body),
+    }),
+  stopRx: (
+    patientId: string,
+    rxId: string,
+    token: string,
+    reason = "Course completed"
+  ) =>
+    req<{
+      patient: import("./types").Patient;
+      prescription: import("./types").Prescription;
+      graph: import("./types").GraphPayload;
+      snapshot: Record<string, number>;
+      attention: import("./types").Attention;
+      connections?: import("./types").Connections;
+    }>(`/api/patients/${patientId}/rx/${rxId}/stop`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({ reason }),
     }),
   wsUrl: (patientId: string, token: string) => {
     const base = API.replace(/^http/, "ws");

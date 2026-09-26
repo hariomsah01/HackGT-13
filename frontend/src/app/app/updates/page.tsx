@@ -21,6 +21,8 @@ const COLLAB_KINDS = new Set([
   "note",
   "rx_add",
   "rx_analyze",
+  "rx_stop",
+  "office_call",
   "visit",
   "brief",
 ]);
@@ -35,6 +37,10 @@ function collabLabel(kind: string) {
       return "Medicine update";
     case "rx_analyze":
       return "Medicine check";
+    case "rx_stop":
+      return "Medicine completed";
+    case "office_call":
+      return "Office call";
     case "visit":
       return "Visit note";
     case "brief":
@@ -220,48 +226,37 @@ export default function UpdatesPage() {
   }
 
   const rxEvents = events.filter((e) =>
-    ["rx_analyze", "rx_add"].includes(e.kind)
+    ["rx_analyze", "rx_add", "rx_stop"].includes(e.kind)
   );
   const collab = events.filter((e) => COLLAB_KINDS.has(e.kind));
 
   return (
     <main className="workspace w-full">
-      <h1 className="font-display text-3xl font-bold tracking-tight xl:text-4xl">
-        Updates
+      <h1 className="font-display text-[clamp(2.25rem,4vw,3.5rem)] font-extrabold leading-[0.95] tracking-tight text-[var(--ink)]">
+        Team updates
       </h1>
-      <p className="mt-1 text-[var(--muted)]">
-        Notes, messages, and medicine checks across shared charts.
+      <p className="mt-2 text-[clamp(1rem,1.15vw,1.15rem)] text-[var(--muted)]">
+        Handoffs, medicines, and team notes
       </p>
 
       {!!handoffs.length && (
         <section className="mt-8">
-          <h2 className="font-display text-lg font-bold">Open handoffs</h2>
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <h2 className="font-display text-[clamp(1.35rem,1.8vw,1.85rem)] font-bold tracking-tight">
+            Open handoffs
+          </h2>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {handoffs.map((h) => (
               <Link
                 key={h.patient_id}
                 href={`/app/patients/${h.patient_id}`}
-                className="card block px-5 py-4 transition hover:border-teal-600/40"
+                className="rounded-[1.5rem] border border-[var(--line)] bg-white px-5 py-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:border-teal-600/35"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-display text-base font-bold">
-                    {h.patient_label}
-                  </p>
-                  <span
-                    className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
-                      h.attention?.level === "caution"
-                        ? "bg-rose-50 text-rose-900"
-                        : h.attention?.level === "review"
-                          ? "bg-amber-50 text-amber-950"
-                          : "bg-sky-50 text-sky-950"
-                    }`}
-                  >
-                    {h.attention?.badge || "Handoff"}
-                  </span>
-                </div>
-                {h.open_question && (
-                  <p className="mt-2 text-sm text-[var(--muted)]">
-                    {h.open_question}
+                <p className="font-display text-base font-bold text-[var(--ink)]">
+                  {h.patient_label}
+                </p>
+                {h.next_step && (
+                  <p className="mt-2 text-xs font-semibold text-teal-900">
+                    Next: {h.next_step}
                   </p>
                 )}
               </Link>
@@ -272,15 +267,20 @@ export default function UpdatesPage() {
 
       {!!rxEvents.length && (
         <section className="mt-8">
-          <h2 className="font-display text-lg font-bold">Medicines</h2>
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <h2 className="font-display text-[clamp(1.35rem,1.8vw,1.85rem)] font-bold tracking-tight">
+            Medicine checks
+          </h2>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {rxEvents.slice(0, 6).map((e) => (
-              <article key={e.id} className="card px-5 py-4">
+              <article
+                key={e.id}
+                className="rounded-[1.5rem] border border-[var(--line)] bg-white px-5 py-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)]"
+              >
                 <p className="text-xs text-[var(--muted)]">
                   {new Date(e.timestamp).toLocaleString()}
                 </p>
-                <p className="mt-2 text-sm leading-relaxed">
-                  <strong>{e.actor_label}</strong> {e.detail}
+                <p className="mt-2 text-sm leading-relaxed text-[var(--ink)]">
+                  <span className="font-semibold">{e.actor_label}</span> {e.detail}
                 </p>
               </article>
             ))}
@@ -288,27 +288,34 @@ export default function UpdatesPage() {
         </section>
       )}
 
-      <h2 className="font-display mt-10 text-lg font-bold">Recent</h2>
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {collab.map((e) => (
-          <article key={e.id} className="card px-5 py-4">
-            <p className="text-xs text-[var(--muted)]">
-              {new Date(e.timestamp).toLocaleString()}
+      <section className="mt-8">
+        <h2 className="font-display text-[clamp(1.35rem,1.8vw,1.85rem)] font-bold tracking-tight">
+          Recent
+        </h2>
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {collab.map((e) => (
+            <article
+              key={e.id}
+              className="rounded-[1.5rem] border border-[var(--line)] bg-white px-5 py-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)]"
+            >
+              <p className="text-xs text-[var(--muted)]">
+                {new Date(e.timestamp).toLocaleString()}
+              </p>
+              <p className="mt-1 text-xs font-semibold text-[var(--brand)]">
+                {collabLabel(e.kind)}
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--ink)]">
+                <span className="font-semibold">{e.actor_label}</span> {e.detail}
+              </p>
+            </article>
+          ))}
+          {!collab.length && (
+            <p className="col-span-full rounded-[1.5rem] border border-[var(--line)] bg-white px-6 py-12 text-center text-[var(--muted)]">
+              No updates yet.
             </p>
-            <p className="mt-2 text-sm leading-relaxed">
-              <strong>{e.actor_label}</strong> {e.detail}
-            </p>
-            <p className="mt-2 text-[10px] font-bold uppercase tracking-wide text-teal-800">
-              {collabLabel(e.kind)}
-            </p>
-          </article>
-        ))}
-        {!collab.length && (
-          <p className="card col-span-full p-10 text-center text-[var(--muted)]">
-            No updates yet.
-          </p>
-        )}
-      </div>
+          )}
+        </div>
+      </section>
     </main>
   );
 }
@@ -327,7 +334,7 @@ function PatientMetrics({
   const connections = bundle?.connections;
   const [mapSel, setMapSel] = useState<CareGraphSelection | null>(null);
   const medicineUpdates = events.filter((e) =>
-    ["rx_add", "rx_analyze"].includes(e.kind)
+    ["rx_add", "rx_analyze", "rx_stop"].includes(e.kind)
   );
   const alerts = patientAlerts(bundle?.attention?.flags || []);
 

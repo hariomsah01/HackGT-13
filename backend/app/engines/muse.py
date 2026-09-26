@@ -118,10 +118,47 @@ class MuseClient:
                         "audio": ("visit.wav", wav_bytes, "audio/wav"),
                     },
                 )
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    logger.warning("Muse Voice HTTP %s: %s", resp.status_code, resp.text[:500])
+                    return {
+                        "error": f"Muse Voice returned {resp.status_code}: {resp.text[:200]}",
+                        "transcript": "",
+                        "source": "error",
+                    }
                 data = resp.json()
+                data["transcript"] = _extract_transcript(data)
                 data["source"] = "muse_voice"
                 return data
         except Exception as exc:  # noqa: BLE001
             logger.warning("Muse Voice failed: %s", exc)
             return {"error": str(exc), "transcript": "", "source": "error"}
+
+
+def _extract_transcript(data: dict[str, Any]) -> str:
+    """Prefer speaker-labelled diarization segments; fall back to flat text."""
+    for key in ("segments", "utterances", "diarization", "speakerSegments", "results"):
+        segs = data.get(key)
+        if not isinstance(segs, list) or not segs:
+            continue
+        lines: list[str] = []
+        last_speaker = None
+        for seg in segs:
+            if not isinstance(seg, dict):
+                continue
+            text = str(seg.get("text") or seg.get("transcript") or "").strip()
+            if not text:
+                continue
+            speaker = seg.get("speaker") or seg.get("speakerLabel") or seg.get("speaker_id")
+            label = f"Speaker {speaker}" if isinstance(speaker, int) else (str(speaker) if speaker else "")
+            if label and label == last_speaker and lines:
+                lines[-1] += f" {text}"
+            else:
+                lines.append(f"{label}: {text}" if label else text)
+                last_speaker = label
+        if lines:
+            return "\n".join(lines)
+    for key in ("transcript", "text"):
+        val = data.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""

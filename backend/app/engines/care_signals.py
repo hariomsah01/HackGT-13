@@ -163,21 +163,6 @@ def care_attention(patient: Patient, briefing: Optional[dict] = None) -> dict[st
             }
         )
 
-    if briefing and briefing.get("open_question"):
-        flags.append(
-            {
-                "level": "handoff",
-                "code": "open_question",
-                "title": "Open team question",
-                "detail": str(briefing.get("open_question")),
-                "patient_title": "Your care team has an open item",
-                "patient_detail": (
-                    "Your doctors are still closing one question on your plan. "
-                    "Check Messages if they asked you for anything."
-                ),
-            }
-        )
-
     level_rank = {"info": 0, "handoff": 1, "review": 2, "caution": 3}
     top = max((level_rank.get(f["level"], 0) for f in flags), default=0)
     level = {0: "clear", 1: "handoff", 2: "review", 3: "caution"}.get(top, "clear")
@@ -204,19 +189,22 @@ def handoff_pack(
     store: CareStore,
     briefing: Optional[dict] = None,
 ) -> dict[str, Any]:
-    """Open questions + next steps surfaced for room + updates."""
+    """Next steps and attention surfaced for room + updates."""
     briefing = briefing or store.get_briefing(patient.id) or {}
     tasks = store.list_tasks(patient.id)
     open_tasks = [t for t in tasks if (t.get("status") or "open") != "done"]
     attention = care_attention(patient, briefing)
     team_ids = [m.id for m in patient.team]
+    issue = str(briefing.get("issue") or "")
+    if "aligned" in issue.lower():
+        issue = f"Care plan for {patient.label}"
     return {
         "patient_id": patient.id,
         "patient_label": patient.label,
-        "open_question": briefing.get("open_question") or "",
+        "open_question": "",
         "owner": briefing.get("owner") or "",
         "next_step": briefing.get("next_step") or "",
-        "issue": briefing.get("issue") or "",
+        "issue": issue,
         "for_patient": briefing.get("for_patient") or "",
         "tasks": open_tasks[:5],
         "attention": attention,

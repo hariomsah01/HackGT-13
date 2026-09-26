@@ -131,7 +131,7 @@ Question: {q}
                 return f"{label} attention: {attn.get('badge')} — {(attn.get('flags') or [{}])[0].get('detail', 'See the patient room.')}"
             if handoffs:
                 bits = [
-                    f"{h.get('patient_label')}: {h.get('open_question') or h.get('attention', {}).get('badge', 'review')}"
+                    f"{h.get('patient_label')}: {h.get('next_step') or h.get('attention', {}).get('badge', 'review')}"
                     for h in handoffs[:5]
                 ]
                 return "Patients needing team attention — " + " · ".join(bits)

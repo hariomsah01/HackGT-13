@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 from app.config import get_settings
+from app.engines.drug_lookup import online_safety_check
 from app.models.schemas import Patient, Prescription
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,30 @@ CLASS_CONFLICTS: list[tuple[str, str, str, str]] = [
         "arb",
         "medium",
         "NSAID + ARB can worsen kidney function.",
+    ),
+    (
+        "nsaid",
+        "loop_diuretic",
+        "high",
+        "NSAID + loop diuretic + ACE/ARB (or alone with diuretic) can cause acute kidney injury — high risk in CKD.",
+    ),
+    (
+        "doac",
+        "ssri",
+        "medium",
+        "Blood thinner + SSRI can increase bleeding risk.",
+    ),
+    (
+        "warfarin",
+        "ssri",
+        "medium",
+        "Warfarin + SSRI can increase bleeding risk.",
+    ),
+    (
+        "sglt2",
+        "biguanide",
+        "medium",
+        "SGLT2 + metformin: watch volume depletion and rare ketoacidosis risk — review sick-day rules.",
     ),
 ]
 
@@ -160,25 +185,84 @@ class RxAnalyzer:
         active = [rx for rx in patient.prescriptions if rx.status == "active"]
         heuristic = self._heuristic(patient, proposed, active)
 
+        # Live drug references (NIH RxNav interactions + OpenFDA label warnings)
+        cond_text = " ".join(c.name for c in patient.conditions)
+        online = online_safety_check(
+            proposed["name"],
+            [rx.name for rx in active],
+            cond_text,
+        )
+        online_findings = online.get("findings") or []
+        if online_findings:
+            heuristic["findings"] = self._merge_findings(
+                heuristic.get("findings") or [], online_findings
+            )
+            heuristic["severity"] = _roll_up(heuristic["findings"])
+            heuristic["impacts_other_regimens"] = any(
+                f.get("affects_other_doctors") for f in heuristic["findings"]
+            )
+            heuristic["summary"] = _summary_line(
+                proposed["name"],
+                heuristic["severity"],
+                heuristic["findings"],
+                heuristic["impacts_other_regimens"],
+            )
+            heuristic["recommendation"] = _recommend(
+                heuristic["severity"],
+                heuristic["findings"],
+                proposing_label=proposed["proposed_by"],
+            )
+            heuristic["online_sources"] = online.get("sources") or []
+
+        # Always surface that published references were consulted
+        heuristic["online_sources"] = online.get("sources") or ["RxNav", "OpenFDA"]
+        heuristic["online"] = True
+
         if not self._client:
-            heuristic["engine"] = "heuristic"
+            heuristic["engine"] = "heuristic+online" if online_findings else "heuristic"
             heuristic["openai"] = False
             return heuristic
 
         try:
-            llm = self._openai_analyze(patient, proposed, active, heuristic)
-            llm["engine"] = "openai"
+            llm = self._openai_analyze(patient, proposed, active, heuristic, online)
+            llm["engine"] = "openai+online" if online_findings else "openai"
             llm["openai"] = True
-            # Keep heuristic findings if the model omitted them
+            llm["online"] = True
+            llm["online_sources"] = online.get("sources") or ["RxNav", "OpenFDA"]
             if not llm.get("findings") and heuristic.get("findings"):
                 llm["findings"] = heuristic["findings"]
+            else:
+                llm["findings"] = self._merge_findings(
+                    llm.get("findings") or [], online_findings
+                )
+                llm["severity"] = _roll_up(llm["findings"]) or llm.get("severity")
             return llm
         except Exception as exc:  # noqa: BLE001
             logger.warning("OpenAI Rx analysis failed: %s", exc)
-            heuristic["engine"] = "heuristic"
+            heuristic["engine"] = "heuristic+online" if online_findings else "heuristic"
             heuristic["openai"] = False
             heuristic["error"] = str(exc)
             return heuristic
+
+    @staticmethod
+    def _merge_findings(
+        base: list[dict[str, Any]], extra: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        seen = {
+            (str(f.get("title") or "").lower(), str(f.get("detail") or "")[:60].lower())
+            for f in base
+        }
+        out = list(base)
+        for f in extra:
+            key = (
+                str(f.get("title") or "").lower(),
+                str(f.get("detail") or "")[:60].lower(),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(f)
+        return out
 
     def _openai_analyze(
         self,
@@ -186,6 +270,7 @@ class RxAnalyzer:
         proposed: dict[str, Any],
         active: list[Prescription],
         heuristic: dict[str, Any],
+        online: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         others = [
             {
@@ -221,11 +306,19 @@ class RxAnalyzer:
             "active_from_other_doctors": others,
             "active_from_proposing_doctor": same_doc,
             "heuristic_hints": heuristic.get("findings", []),
+            "online_drug_reference": {
+                "sources": (online or {}).get("sources") or [],
+                "findings": (online or {}).get("findings") or [],
+            },
         }
         system = (
             "You are ClearPath prescription safety reviewer for a SHARED multi-doctor care chart. "
             "Doctors A–D all prescribe into one patient chart. Analyze the proposed Rx against "
             "conditions and ALL active medicines, especially those from OTHER doctors. "
+            "Use online_drug_reference (NIH RxNav interactions + OpenFDA label warnings) as "
+            "authoritative published signals for dangerous overlaps, contraindications, and "
+            "life-threatening risks. Escalate severity to avoid when interactions are "
+            "contraindicated, fatal, or boxed-warning level. "
             "Never invent labs or diagnoses not in the JSON. "
             "Return ONLY valid JSON with keys: "
             "severity (ok|review|caution|avoid), "
@@ -244,7 +337,7 @@ class RxAnalyzer:
                 {"role": "system", "content": system},
                 {
                     "role": "user",
-                    "content": json.dumps(payload, indent=2, default=str)[:20000],
+                    "content": json.dumps(payload, indent=2, default=str)[:24000],
                 },
             ],
         )

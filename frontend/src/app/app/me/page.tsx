@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { startVisitRecording, type VisitRecorder } from "@/lib/wavRecorder";
 import { useAuth } from "@/lib/auth";
 import { useAskScreen } from "@/lib/askScreen";
 import type { PatientBundle, RoomMessage } from "@/lib/types";
@@ -18,6 +19,21 @@ export default function MePage() {
   const [toId, setToId] = useState(""); // "" = whole care team
   const [sending, setSending] = useState(false);
   const [sentNote, setSentNote] = useState<string | null>(null);
+  const [callDoctorId, setCallDoctorId] = useState("doctor_a");
+  const [callReason, setCallReason] = useState("");
+  const [callBusy, setCallBusy] = useState(false);
+  const [callNote, setCallNote] = useState<string | null>(null);
+  const [callRecording, setCallRecording] = useState(false);
+  const [callSeconds, setCallSeconds] = useState(0);
+  const callRecorderRef = useRef<VisitRecorder | null>(null);
+
+  useEffect(() => {
+    if (!callRecording) return;
+    const t = setInterval(() => setCallSeconds((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [callRecording]);
+
+  useEffect(() => () => callRecorderRef.current?.cancel(), []);
 
   useEffect(() => {
     if (ready && !user) router.replace("/login");
@@ -55,7 +71,19 @@ export default function MePage() {
 
   const p = bundle?.patient;
   const meds = p?.prescriptions.filter((x) => x.status === "active") ?? [];
-  const messages: RoomMessage[] = (bundle?.room?.messages || []).slice(-8).reverse();
+  const allRoom = bundle?.room?.messages || [];
+  const visibleMessages = allRoom.filter((m) => {
+    if (!user) return false;
+    // Shared team messages, messages this patient sent, or private replies to this patient
+    return (
+      !m.to_id ||
+      m.author_id === user.id ||
+      m.to_id === chartId
+    );
+  });
+  const messages: RoomMessage[] = visibleMessages.slice(-12).reverse();
+  const teamThread = messages.filter((m) => !m.to_id);
+  const privateThread = messages.filter((m) => !!m.to_id);
 
   useAskScreen(
     p
@@ -96,13 +124,68 @@ export default function MePage() {
       setMsg("");
       setSentNote(
         member
-          ? `Sent to ${member.label}. They will see it in your shared room.`
-          : "Sent to your full care team. Doctors will see it in your shared room."
+          ? `Private message sent to ${member.label}. They will see it under Talk → Patient private.`
+          : "Sent to your full care team. Doctors will see it in the shared Team room."
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send message");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function startCallRecording() {
+    setError(null);
+    setCallNote(null);
+    try {
+      callRecorderRef.current = await startVisitRecording();
+      setCallSeconds(0);
+      setCallRecording(true);
+    } catch {
+      setError("Microphone access was blocked — allow it in the browser address bar and try again.");
+    }
+  }
+
+  async function stopCallRecording() {
+    const rec = callRecorderRef.current;
+    callRecorderRef.current = null;
+    setCallRecording(false);
+    if (!rec) return;
+    const wav = await rec.stop();
+    await submitOfficeCall(wav);
+  }
+
+  function callOffice(e: React.FormEvent) {
+    e.preventDefault();
+    void submitOfficeCall();
+  }
+
+  async function submitOfficeCall(audio?: Blob) {
+    if (!token || !chartId || !callDoctorId) return;
+    setCallBusy(true);
+    setCallNote(null);
+    try {
+      const member = p?.team.find((m) => m.id === callDoctorId);
+      const reason =
+        callReason.trim() || "I need to talk about my symptoms and schedule a checkup";
+      const res = audio
+        ? await api.officeCallAudio(chartId, { doctor_id: callDoctorId, reason }, audio, token)
+        : await api.officeCall(chartId, { doctor_id: callDoctorId, reason, demo: true }, token);
+      setCallReason("");
+      setCallNote(
+        `${audio ? "Muse Voice transcribed your call. " : ""}` +
+          `Office assistant logged it for ${member?.label || "your doctor"}. ` +
+          `They were notified: “${res.call.insight}”`
+      );
+      setBundle((prev) =>
+        prev
+          ? { ...prev, office_calls: res.office_calls, room: prev.room }
+          : prev
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not complete office call");
+    } finally {
+      setCallBusy(false);
     }
   }
 
@@ -122,6 +205,37 @@ export default function MePage() {
         <p className="mt-3 whitespace-nowrap text-[clamp(1rem,1.2vw,1.25rem)] leading-relaxed text-[var(--muted)]">
           Your doctors already share this information in one common space.
         </p>
+
+        {p && (p.phone || p.address) && (
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            {(p.phone || p.email) && (
+              <div className="rounded-2xl border border-[var(--line)] bg-white/90 px-4 py-3 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand)]">
+                  Contact
+                </p>
+                {p.phone ? (
+                  <p className="mt-1 text-sm font-semibold text-[var(--ink)]">{p.phone}</p>
+                ) : null}
+                {p.email ? (
+                  <p className="mt-0.5 break-all text-xs text-[var(--muted)]">{p.email}</p>
+                ) : null}
+              </div>
+            )}
+            {(p.address || p.city) && (
+              <div className="rounded-2xl border border-[var(--line)] bg-white/90 px-4 py-3 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand)]">
+                  Address
+                </p>
+                {p.address ? (
+                  <p className="mt-1 text-sm font-semibold text-[var(--ink)]">{p.address}</p>
+                ) : null}
+                <p className="mt-0.5 text-xs text-[var(--muted)]">
+                  {[p.city, p.state, p.zip].filter(Boolean).join(", ")}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {error && (
           <p className="mt-8 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">
@@ -224,6 +338,89 @@ export default function MePage() {
               </ul>
             </section>
 
+            <section className="rounded-[1.75rem] border border-[var(--line)] bg-white p-[clamp(1.25rem,2vw,2rem)] shadow-[0_16px_40px_rgba(15,23,42,0.05)] lg:col-span-12">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
+                Call the office
+              </p>
+              <h2 className="font-display mt-2 text-[clamp(1.35rem,1.8vw,1.85rem)] font-bold tracking-tight">
+                When your doctor is unavailable
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
+                Call any doctor&apos;s office. A health assistant takes the conversation and
+                sends your doctor an insight so they can reply to you in private chat.
+              </p>
+              <form onSubmit={callOffice} className="mt-6 grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="text-sm font-semibold text-[var(--ink)]">Office</span>
+                  <select
+                    value={callDoctorId}
+                    onChange={(e) => setCallDoctorId(e.target.value)}
+                    className="mt-1.5 w-full rounded-2xl border border-[var(--line)] bg-[var(--paper)] px-4 py-3 text-sm outline-none focus:border-[var(--brand)] focus:bg-white"
+                  >
+                    {p.team.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                        {m.specialty ? ` · ${m.specialty}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="text-sm font-semibold text-[var(--ink)]">
+                    Why are you calling?
+                  </span>
+                  <input
+                    value={callReason}
+                    onChange={(e) => setCallReason(e.target.value)}
+                    placeholder="Appointment, checkup, symptoms…"
+                    className="mt-1.5 w-full rounded-2xl border border-[var(--line)] bg-[var(--paper)] px-4 py-3 text-sm outline-none focus:border-[var(--brand)] focus:bg-white"
+                  />
+                </label>
+                <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
+                  {callRecording ? (
+                    <button
+                      type="button"
+                      onClick={stopCallRecording}
+                      className="flex items-center gap-2.5 rounded-2xl bg-rose-600 px-6 py-3 text-sm font-bold text-white"
+                    >
+                      <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-white" />
+                      Hang up and send · {Math.floor(callSeconds / 60)}:
+                      {String(callSeconds % 60).padStart(2, "0")}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={callBusy}
+                      onClick={startCallRecording}
+                      className="flex items-center gap-2.5 rounded-2xl bg-[var(--ink)] px-6 py-3 text-sm font-bold text-white disabled:opacity-40"
+                    >
+                      <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
+                      {callBusy ? "Transcribing with Muse…" : "Start recorded call"}
+                    </button>
+                  )}
+                  {!callRecording && (
+                    <button
+                      type="submit"
+                      disabled={callBusy}
+                      className="rounded-2xl border border-[var(--line)] px-6 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      Send without recording
+                    </button>
+                  )}
+                  <span className="text-xs text-[var(--muted)]">
+                    {bundle?.muse?.enabled
+                      ? "Recorded calls are transcribed by Meta Muse Voice."
+                      : "Muse key not set, recordings use a demo transcript."}
+                  </span>
+                </div>
+              </form>
+              {callNote && (
+                <p className="mt-4 rounded-2xl bg-teal-50 px-4 py-3 text-sm text-teal-950">
+                  {callNote}
+                </p>
+              )}
+            </section>
+
             <section
               id="message-team"
               className="scroll-mt-24 rounded-[1.75rem] border border-[var(--line)] bg-white p-[clamp(1.25rem,2vw,2rem)] shadow-[0_16px_40px_rgba(15,23,42,0.05)] lg:col-span-12"
@@ -235,7 +432,8 @@ export default function MePage() {
                 Message the care team
               </h2>
               <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
-                Send to the whole care team, or to one doctor on your chart.
+                Send to the full care team (shared room), or privately to one doctor —
+                they will see it under Talk → Patient private on your chart.
               </p>
 
               <form onSubmit={sendToDoctors} className="mt-6 space-y-3">
@@ -246,10 +444,10 @@ export default function MePage() {
                     onChange={(e) => setToId(e.target.value)}
                     className="mt-1.5 w-full rounded-2xl border border-[var(--line)] bg-[var(--paper)] px-4 py-3 text-sm outline-none transition focus:border-[var(--brand)] focus:bg-white sm:max-w-md"
                   >
-                    <option value="">Full care team</option>
+                    <option value="">Full care team (shared)</option>
                     {p.team.map((m) => (
                       <option key={m.id} value={m.id}>
-                        {m.label}
+                        Private · {m.label}
                         {m.specialty ? ` · ${m.specialty}` : ""}
                       </option>
                     ))}
@@ -262,7 +460,11 @@ export default function MePage() {
                       value={msg}
                       onChange={(e) => setMsg(e.target.value)}
                       rows={3}
-                      placeholder="Ask a question or share an update…"
+                      placeholder={
+                        toId
+                          ? "Private message to this doctor…"
+                          : "Ask a question or share an update with the whole team…"
+                      }
                       className="w-full resize-y rounded-2xl border border-[var(--line)] bg-[var(--paper)] px-4 py-3 text-sm outline-none transition focus:border-[var(--brand)] focus:bg-white"
                     />
                   </label>
@@ -280,25 +482,63 @@ export default function MePage() {
                 <p className="mt-3 text-sm font-medium text-teal-800">{sentNote}</p>
               )}
 
-              {messages.length > 0 && (
-                <ul className="mt-6 space-y-3 border-t border-[var(--line)] pt-5">
-                  {messages.map((m) => (
-                    <li key={m.id} className="rounded-2xl bg-[var(--paper)] px-4 py-3">
-                      <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <p className="text-sm font-semibold text-[var(--ink)]">
-                          {m.author_label}
-                          <span className="ml-2 font-normal text-[var(--muted)]">
-                            → {m.to_label || "Care team"}
-                          </span>
+              {!!teamThread.length && (
+                <div className="mt-6 border-t border-[var(--line)] pt-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--brand)]">
+                    Shared with care team
+                  </p>
+                  <ul className="mt-3 space-y-3">
+                    {teamThread.map((m) => (
+                      <li key={m.id} className="rounded-2xl bg-[var(--paper)] px-4 py-3">
+                        <div className="flex flex-wrap items-baseline justify-between gap-2">
+                          <p className="text-sm font-semibold text-[var(--ink)]">
+                            {m.author_label}
+                            <span className="ml-2 font-normal text-[var(--muted)]">
+                              → Care team
+                            </span>
+                          </p>
+                          <p className="text-xs text-[var(--muted)]">
+                            {new Date(m.timestamp).toLocaleString()}
+                          </p>
+                        </div>
+                        <p className="mt-1 text-sm leading-relaxed text-[var(--muted)]">
+                          {m.text}
                         </p>
-                        <p className="text-xs text-[var(--muted)]">
-                          {new Date(m.timestamp).toLocaleString()}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {!!privateThread.length && (
+                <div className="mt-6 border-t border-[var(--line)] pt-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--brand)]">
+                    Private with a doctor
+                  </p>
+                  <ul className="mt-3 space-y-3">
+                    {privateThread.map((m) => (
+                      <li
+                        key={m.id}
+                        className="rounded-2xl border border-teal-100 bg-teal-50/50 px-4 py-3"
+                      >
+                        <div className="flex flex-wrap items-baseline justify-between gap-2">
+                          <p className="text-sm font-semibold text-[var(--ink)]">
+                            {m.author_label}
+                            <span className="ml-2 font-normal text-[var(--muted)]">
+                              → {m.to_label || "Doctor"}
+                            </span>
+                          </p>
+                          <p className="text-xs text-[var(--muted)]">
+                            {new Date(m.timestamp).toLocaleString()}
+                          </p>
+                        </div>
+                        <p className="mt-1 text-sm leading-relaxed text-[var(--muted)]">
+                          {m.text}
                         </p>
-                      </div>
-                      <p className="mt-1 text-sm leading-relaxed text-[var(--muted)]">{m.text}</p>
-                    </li>
-                  ))}
-                </ul>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </section>
           </div>

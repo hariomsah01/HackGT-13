@@ -32,15 +32,15 @@ const FEATURES = [
   ],
   [
     "Visit audio to note",
-    "Record the visit. Muse turns speech into a structured note the rest of the team can read the same day.",
+    "Call the office while the doctor is away. A health assistant captures the conversation and alerts the doctor with what you need.",
   ],
   [
     "Rx safety before save",
-    "Type a new medicine and run Analyze. OpenAI checks it against active scripts from every doctor on the chart.",
+    "Type a new medicine and run Analyze safety. ClearPath checks the shared chart plus NIH RxNav / OpenFDA for dangerous overlaps.",
   ],
   [
     "Team briefing card",
-    "At the top of the room: open question, owner and next step. Muse refreshes it when the huddle changes.",
+    "At the top of the room: owner and next step. Muse refreshes it when the huddle changes.",
   ],
   [
     "Ask across the chart",
@@ -103,6 +103,7 @@ const ENGINES = [
   ["Meta Muse", "Transcribes visits and writes the team briefing."],
   ["Google Gemini", "Answers questions about anything on the platform."],
   ["OpenAI", "Reviews each new prescription for safety."],
+  ["Grok bot", "Powers the PA automation demo and live care checks."],
 ] as const;
 
 export default function HomePage() {
@@ -447,6 +448,16 @@ export default function HomePage() {
               >
                 I am a patient
               </Link>
+              <a
+                id="pa-automation"
+                href="#pa-automation"
+                aria-disabled="true"
+                title="Prior authorization automation demo. Coming soon."
+                className="rounded-2xl border border-dashed border-white/50 px-8 py-4 text-lg font-semibold text-white/90 transition duration-300 hover:-translate-y-0.5 hover:bg-white/10"
+                onClick={(e) => e.preventDefault()}
+              >
+                PA Automation Demo
+              </a>
             </div>
           </div>
         </div>

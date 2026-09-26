@@ -21,8 +21,10 @@ from app.models.schemas import (
     LoginRequest,
     MessageRequest,
     NoteRequest,
+    OfficeCallRequest,
     RxAddRequest,
     RxProposeRequest,
+    RxStopRequest,
 )
 
 router = APIRouter(prefix="/api")
@@ -170,23 +172,129 @@ async def capture_visit(
     authorization: Optional[str] = Header(default=None),
     audio: Optional[UploadFile] = File(default=None),
     demo: str = Form(default="false"),
+    doctor_id: str = Form(default=""),
+    reason: str = Form(default=""),
 ):
-    """Muse Voice → transcript → Muse Spark structured shared note."""
+    """Legacy alias — office call intake (health assistant ↔ patient)."""
     user = user_from(authorization)
-    if user.kind != "doctor":
-        raise HTTPException(403, "Only doctors can capture visits")
     e = eng(request)
     wav = await audio.read() if audio is not None else None
     use_demo = demo.lower() in ("1", "true", "yes") or not wav
+    target = doctor_id.strip() or (user.id if user.kind == "doctor" else "")
+    if not target:
+        raise HTTPException(400, "Choose which doctor's office was called")
     try:
-        return e.capture_visit(patient_id, user, wav if not use_demo else None, demo=use_demo)
+        return e.record_office_call(
+            patient_id,
+            user,
+            target,
+            reason=reason,
+            wav_bytes=wav if not use_demo else None,
+            demo=use_demo,
+        )
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/patients/{patient_id}/office-call")
+async def office_call(
+    patient_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    audio: Optional[UploadFile] = File(default=None),
+    doctor_id: str = Form(default=""),
+    reason: str = Form(default=""),
+    demo: str = Form(default="true"),
+):
+    """Record a patient call to a doctor's office (health assistant intake)."""
+    user = user_from(authorization)
+    e = eng(request)
+    # Prefer JSON body when no multipart file
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        raw = await request.json()
+        body = OfficeCallRequest(**raw)
+        try:
+            return e.record_office_call(
+                patient_id,
+                user,
+                body.doctor_id,
+                reason=body.reason,
+                demo=body.demo,
+                transcript_override=body.transcript,
+            )
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    wav = await audio.read() if audio is not None else None
+    use_demo = demo.lower() in ("1", "true", "yes") or not wav
+    if not doctor_id.strip():
+        raise HTTPException(400, "Choose which doctor's office was called")
+    try:
+        return e.record_office_call(
+            patient_id,
+            user,
+            doctor_id.strip(),
+            reason=reason,
+            wav_bytes=wav if not use_demo else None,
+            demo=use_demo,
+        )
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/notifications")
+def notifications(
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = user_from(authorization)
+    e = eng(request)
+    try:
+        return e.list_doctor_notifications(user)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/notifications/{note_id}/read")
+def read_notification(
+    note_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = user_from(authorization)
+    e = eng(request)
+    try:
+        return e.mark_notification_read(user, note_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/office-calls/{call_id}/responded")
+def office_call_responded(
+    call_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = user_from(authorization)
+    e = eng(request)
+    try:
+        return e.mark_office_call_responded(user, call_id)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
 # Chart opens / Ask probes stay out of patient-facing feeds
 _PRIVATE_ACTIVITY = frozenset({"viewed", "ask"})
-_PATIENT_ACTIVITY = frozenset({"message", "note", "rx_add", "rx_analyze", "visit", "brief"})
+_PATIENT_ACTIVITY = frozenset(
+    {"message", "note", "rx_add", "rx_analyze", "rx_stop", "visit", "office_call", "brief"}
+)
 
 
 @router.get("/activity")
@@ -261,7 +369,7 @@ def ask_screen(
 def handoffs(
     request: Request, authorization: Optional[str] = Header(default=None)
 ):
-    """Open questions + attention across the shared care space."""
+    """Attention handoffs across the shared care space."""
     user = user_from(authorization)
     e = eng(request)
     analytics = e.analytics()
@@ -317,6 +425,28 @@ def add_rx(
             body.frequency,
             body.reason,
             body.analysis_severity,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/patients/{patient_id}/rx/{rx_id}/stop")
+def stop_rx(
+    patient_id: str,
+    rx_id: str,
+    request: Request,
+    body: Optional[RxStopRequest] = None,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Prescribing doctor removes/stops a medicine when the course is complete."""
+    user = user_from(authorization)
+    e = eng(request)
+    try:
+        return e.stop_prescription(
+            patient_id,
+            user,
+            rx_id,
+            (body.reason if body else "") or "Course completed",
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -384,13 +514,20 @@ async def room_socket(websocket: WebSocket, patient_id: str):
             if kind == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
             elif kind == "message" and data.get("text"):
-                result = engine.post_message(patient_id, user, data["text"])
+                result = engine.post_message(
+                    patient_id,
+                    user,
+                    data["text"],
+                    to_id=data.get("to_id"),
+                    to_label=data.get("to_label"),
+                )
                 await hub.broadcast(
                     patient_id,
                     {
                         "type": "room_update",
                         "room": result["room"],
-                        "briefing": result["briefing"],
+                        "briefing": result.get("briefing"),
+                        "private": result.get("private", False),
                         "actor": user.label,
                     },
                 )

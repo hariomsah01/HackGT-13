@@ -137,7 +137,8 @@ class CareAgent:
         user = (
             f"Patient id: {patient_id}. Recent room messages:\n{transcript}\n\n"
             "1) Call tools you need. 2) When done, reply with JSON only:\n"
-            '{"issue":"...","open_question":"...","owner":"Doctor X","next_step":"...","for_patient":"..."}'
+            '{"issue":"...","owner":"Doctor X","next_step":"...","for_patient":"..."}'
+            " Do not invent an open question. Keep issue short and clinical, never about team alignment."
         )
 
         if not self.muse.enabled:
@@ -181,6 +182,61 @@ class CareAgent:
                 )
 
         return self._deterministic_brief(patient, room)
+
+    def structure_office_call(
+        self,
+        patient_id: str,
+        transcript: str,
+        doctor_label: str,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """Summarize a health-assistant ↔ patient phone call for the doctor."""
+        patient = self.store.get_patient(patient_id)
+        if not patient:
+            raise ValueError("Patient not found")
+
+        system = (
+            "You summarize a phone call between a clinic health assistant and a patient "
+            "for the patient's doctor who was unavailable. "
+            "Do not invent clinical facts beyond the transcript. Output JSON only with keys: "
+            "topic (short), insight (1-2 sentences telling the doctor what happened and that "
+            "the patient needs to hear from them), needs_callback (bool)."
+        )
+        user = (
+            f"Patient: {patient.label}. Doctor's office: {doctor_label}. "
+            f"Call reason hint: {reason or 'not specified'}.\n\nTranscript:\n{transcript}"
+        )
+
+        parsed = None
+        if self.muse.enabled:
+            text = self.muse.complete_text(system, user)
+            parsed = self._parse_json_block(text or "")
+
+        if not parsed:
+            topic = reason.strip() or "Office call"
+            low = transcript.lower()
+            if "appointment" in low or "checkup" in low or "check-up" in low:
+                topic = "Appointment / checkup"
+            elif "glucose" in low or "blood sugar" in low or "tired" in low:
+                topic = "Symptoms / current condition"
+            parsed = {
+                "topic": topic,
+                "insight": (
+                    f"{patient.label} called your office about {topic.lower()}. "
+                    f"They need to hear from you."
+                ),
+                "needs_callback": True,
+            }
+
+        return {
+            "topic": str(parsed.get("topic") or "Office call"),
+            "insight": str(
+                parsed.get("insight")
+                or f"{patient.label} called your office and needs to hear from you."
+            ),
+            "needs_callback": bool(parsed.get("needs_callback", True)),
+            "engine": "muse_spark" if self.muse.enabled else "deterministic",
+        }
 
     def structure_visit(
         self, patient_id: str, transcript: str, doctor: SessionUser
@@ -268,14 +324,13 @@ class CareAgent:
         )
 
     def _deterministic_brief(self, patient: Patient, room) -> dict[str, Any]:
-        last = room.messages[-1].text if room and room.messages else ""
         owner = patient.team[1].label if len(patient.team) > 1 else "Doctor A"
         briefing = {
-            "issue": f"Keep {patient.label}'s care team aligned on the shared chart",
-            "open_question": last[:120] if last else "Anything the team still needs from each other?",
+            "issue": f"Care plan for {patient.label}",
+            "open_question": "",
             "owner": owner,
             "next_step": f"{owner} reviews the latest notes and confirms the plan with Doctor A",
-            "for_patient": "Your doctors reviewed your chart together. You do not need to repeat your history at each visit.",
+            "for_patient": "",
             "engine": "deterministic",
         }
         self.store.save_briefing(patient.id, briefing)
@@ -283,13 +338,15 @@ class CareAgent:
 
     def _parse_briefing(self, content: str, patient: Patient) -> dict[str, Any]:
         data = self._parse_json_block(content) or {}
+        issue = str(data.get("issue") or f"Care plan for {patient.label}")
+        if "aligned" in issue.lower():
+            issue = f"Care plan for {patient.label}"
         return {
-            "issue": data.get("issue") or f"Team alignment for {patient.label}",
-            "open_question": data.get("open_question") or "What still needs a human decision?",
+            "issue": issue,
+            "open_question": "",
             "owner": data.get("owner") or "Doctor A",
             "next_step": data.get("next_step") or "Review the shared chart together",
-            "for_patient": data.get("for_patient")
-            or "Your doctors reviewed your chart together. You do not need to repeat your history at each visit.",
+            "for_patient": data.get("for_patient") or "",
         }
 
     def _parse_json_block(self, text: str) -> Optional[dict]:
