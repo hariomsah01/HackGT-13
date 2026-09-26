@@ -100,9 +100,10 @@ export default function PatientsPage() {
             <tr>
               <th className="px-5 py-3.5">Patient</th>
               <th className="px-5 py-3.5">Age</th>
+              <th className="px-5 py-3.5">Attention</th>
               <th className="px-5 py-3.5">Medicines</th>
               <th className="px-5 py-3.5">Conditions</th>
-              <th className="px-5 py-3.5">Care team</th>
+              <th className="px-5 py-3.5">Live / handoff</th>
             </tr>
           </thead>
           <tbody>
@@ -117,6 +118,21 @@ export default function PatientsPage() {
                   <p className="text-xs text-[var(--brand)]">Open room →</p>
                 </td>
                 <td className="whitespace-nowrap px-5 py-4 text-[var(--muted)]">{p.age}</td>
+                <td className="whitespace-nowrap px-5 py-4">
+                  <span
+                    className={`rounded-lg px-2.5 py-1 text-xs font-bold ${
+                      p.attention?.level === "caution"
+                        ? "bg-rose-50 text-rose-900"
+                        : p.attention?.level === "review"
+                          ? "bg-amber-50 text-amber-950"
+                          : p.attention?.level === "handoff"
+                            ? "bg-sky-50 text-sky-950"
+                            : "bg-emerald-50 text-emerald-900"
+                    }`}
+                  >
+                    {p.attention?.badge || "Clear"}
+                  </span>
+                </td>
                 <td className="whitespace-nowrap px-5 py-4">
                   <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">
                     {p.active_prescriptions} active
@@ -134,12 +150,26 @@ export default function PatientsPage() {
                     ))}
                   </div>
                 </td>
-                <td className="px-5 py-4 text-[var(--muted)]">{p.team.join(" · ")}</td>
+                <td className="px-5 py-4 text-xs text-[var(--muted)]">
+                  {p.viewing_now?.length ? (
+                    <p className="font-semibold text-emerald-800">
+                      Viewing: {p.viewing_now.join(", ")}
+                    </p>
+                  ) : (
+                    <p>Quiet</p>
+                  )}
+                  {p.open_question && (
+                    <p className="mt-1 line-clamp-2 text-[var(--ink)]">
+                      Q: {p.open_question}
+                      {p.owner ? ` · ${p.owner}` : ""}
+                    </p>
+                  )}
+                </td>
               </tr>
             ))}
             {!filtered.length && (
               <tr>
-                <td colSpan={5} className="px-5 py-16 text-center text-[var(--muted)]">
+                <td colSpan={6} className="px-5 py-16 text-center text-[var(--muted)]">
                   {patients.length
                     ? "No matches for that search."
                     : "No patients yet. Add one to open a shared room."}
@@ -165,10 +195,28 @@ export default function PatientsPage() {
                   Age {p.age} · {p.active_prescriptions} meds
                 </p>
               </div>
-              <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
-                Open
+              <span
+                className={`rounded-lg px-2 py-1 text-xs font-bold ${
+                  p.attention?.level === "caution"
+                    ? "bg-rose-50 text-rose-900"
+                    : p.attention?.level === "review"
+                      ? "bg-amber-50 text-amber-950"
+                      : "bg-slate-100 text-slate-600"
+                }`}
+              >
+                {p.attention?.badge || "Open"}
               </span>
             </div>
+            {p.viewing_now?.length ? (
+              <p className="mt-2 text-xs font-semibold text-emerald-800">
+                Live: {p.viewing_now.join(", ")}
+              </p>
+            ) : null}
+            {p.open_question ? (
+              <p className="mt-2 line-clamp-2 text-xs text-[var(--muted)]">
+                Open: {p.open_question}
+              </p>
+            ) : null}
             <div className="mt-4 flex flex-wrap gap-1.5">
               {p.conditions.map((c) => (
                 <span

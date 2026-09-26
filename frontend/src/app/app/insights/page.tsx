@@ -55,13 +55,14 @@ export default function InsightsPage() {
         </div>
       </div>
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {[
           ["Patients", data.totals.patients],
           ["Conditions", data.totals.conditions],
           ["Active medicines", data.totals.active_prescriptions],
           ["Team links", data.totals.team_links],
           ["Avg bond", data.totals.avg_bond ?? "—"],
+          ["Needs attention", data.totals.needs_attention ?? 0],
         ].map(([k, v]) => (
           <div key={String(k)} className="card p-5">
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
@@ -79,6 +80,7 @@ export default function InsightsPage() {
             {data.patients.map((p) => {
               const meds = Number(p.active_prescriptions || 0);
               const bond = Number(p.bond_score || 0);
+              const attn = p.attention as { badge?: string; level?: string } | undefined;
               return (
                 <Link
                   key={String(p.patient_id)}
@@ -86,7 +88,14 @@ export default function InsightsPage() {
                   className="block"
                 >
                   <div className="mb-1.5 flex justify-between gap-3 text-sm">
-                    <span className="font-semibold">{String(p.label)}</span>
+                    <span className="font-semibold">
+                      {String(p.label)}
+                      {attn?.badge && attn.level !== "clear" && (
+                        <span className="ml-2 text-[10px] font-bold uppercase text-amber-800">
+                          {attn.badge}
+                        </span>
+                      )}
+                    </span>
                     <span className="text-[var(--muted)]">
                       bond {bond} · {meds} meds
                     </span>

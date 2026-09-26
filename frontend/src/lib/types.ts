@@ -87,6 +87,11 @@ export interface PatientListItem {
   conditions: string[];
   active_prescriptions: number;
   team: string[];
+  attention?: Attention;
+  presence?: PresenceUser[];
+  viewing_now?: string[];
+  open_question?: string;
+  owner?: string;
 }
 
 export interface RoomMessage {
@@ -172,6 +177,74 @@ export interface PresenceUser {
   seen_at: string;
 }
 
+export interface AttentionFlag {
+  level: string;
+  code: string;
+  title: string;
+  detail: string;
+}
+
+export interface Attention {
+  level: "clear" | "handoff" | "review" | "caution" | string;
+  badge: string;
+  flags: AttentionFlag[];
+  multi_doctor_rx?: boolean;
+  active_prescriptions?: number;
+  prescriber_count?: number;
+}
+
+export interface TeamActivity {
+  id: string;
+  label: string;
+  kind: string;
+  detail: string;
+  at?: string;
+  viewing_now?: boolean;
+  seen_at?: string;
+}
+
+export interface HandoffPack {
+  patient_id: string;
+  patient_label: string;
+  open_question: string;
+  owner: string;
+  next_step: string;
+  issue: string;
+  for_patient: string;
+  tasks: TeamTask[];
+  attention: Attention;
+  team_activity: TeamActivity[];
+  updated_at?: string;
+}
+
+export interface RxFinding {
+  severity: string;
+  kind: string;
+  title: string;
+  detail: string;
+  affects_other_doctors?: boolean;
+  related_doctors?: string[];
+}
+
+export interface RxAnalysis {
+  severity: string;
+  summary: string;
+  recommendation: string;
+  findings: RxFinding[];
+  impacts_other_regimens: boolean;
+  proposed: {
+    name: string;
+    dose: string;
+    frequency: string;
+    reason: string;
+    proposed_by: string;
+  };
+  engine?: string;
+  openai?: boolean;
+  patient_id?: string;
+  error?: string;
+}
+
 export interface PatientBundle {
   patient: Patient;
   room: CareRoom | null;
@@ -182,13 +255,21 @@ export interface PatientBundle {
   briefing?: Briefing | null;
   tasks?: TeamTask[];
   presence?: PresenceUser[];
+  attention?: Attention;
+  handoff?: HandoffPack;
+  team_activity?: TeamActivity[];
   muse?: { enabled: boolean };
+  openai_rx?: { enabled: boolean };
 }
 
 export interface Analytics {
   updated_at: string;
   totals: Record<string, number>;
-  patients: Array<Record<string, string | number>>;
+  patients: Array<Record<string, string | number | Attention | PresenceUser[]>>;
   activity: ActivityEvent[];
+  handoffs?: HandoffPack[];
+  attention_counts?: Record<string, number>;
   muse_enabled?: boolean;
+  gemini_enabled?: boolean;
+  openai_rx_enabled?: boolean;
 }

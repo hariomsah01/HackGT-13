@@ -7,10 +7,25 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useAskScreen } from "@/lib/askScreen";
 import { CareGraph } from "@/components/CareGraph";
-import type { Briefing, PatientBundle, PresenceUser } from "@/lib/types";
+import { startVisitRecording, type VisitRecorder } from "@/lib/wavRecorder";
+import type { Briefing, PatientBundle, PresenceUser, RxAnalysis } from "@/lib/types";
 
 const TABS = ["Overview", "History", "Treatments", "Team", "Talk", "Visit"] as const;
 type Tab = (typeof TABS)[number];
+
+function attentionClass(level?: string) {
+  if (level === "caution") return "bg-rose-50 text-rose-900 border-rose-200";
+  if (level === "review") return "bg-amber-50 text-amber-950 border-amber-200";
+  if (level === "handoff") return "bg-sky-50 text-sky-950 border-sky-200";
+  return "bg-emerald-50 text-emerald-900 border-emerald-200";
+}
+
+function severityClass(sev?: string) {
+  if (sev === "avoid") return "border-rose-300 bg-rose-50 text-rose-950";
+  if (sev === "caution") return "border-amber-300 bg-amber-50 text-amber-950";
+  if (sev === "review") return "border-sky-300 bg-sky-50 text-sky-950";
+  return "border-emerald-300 bg-emerald-50 text-emerald-950";
+}
 
 export default function PatientRoomPage() {
   const { id } = useParams<{ id: string }>();
@@ -24,7 +39,17 @@ export default function PatientRoomPage() {
   const [presence, setPresence] = useState<PresenceUser[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [visitOut, setVisitOut] = useState<string | null>(null);
+  const [visitSource, setVisitSource] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recSeconds, setRecSeconds] = useState(0);
+  const recorderRef = useRef<VisitRecorder | null>(null);
   const [busy, setBusy] = useState(false);
+  const [rxName, setRxName] = useState("");
+  const [rxDose, setRxDose] = useState("");
+  const [rxFreq, setRxFreq] = useState("");
+  const [rxReason, setRxReason] = useState("");
+  const [rxAnalysis, setRxAnalysis] = useState<RxAnalysis | null>(null);
+  const [rxBusy, setRxBusy] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -127,13 +152,42 @@ export default function PatientRoomPage() {
     }
   }
 
-  async function runVisitDemo() {
+  useEffect(() => {
+    if (!recording) return;
+    const t = setInterval(() => setRecSeconds((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [recording]);
+
+  useEffect(() => () => recorderRef.current?.cancel(), []);
+
+  async function startRecording() {
+    setError(null);
+    try {
+      recorderRef.current = await startVisitRecording();
+      setRecSeconds(0);
+      setRecording(true);
+    } catch {
+      setError("Microphone access was blocked — allow it in the browser address bar and try again.");
+    }
+  }
+
+  async function stopRecording() {
+    const rec = recorderRef.current;
+    recorderRef.current = null;
+    setRecording(false);
+    if (!rec) return;
+    const wav = await rec.stop();
+    await runVisitDemo(wav);
+  }
+
+  async function runVisitDemo(audio?: Blob) {
     if (!token) return;
     setBusy(true);
     setVisitOut(null);
     try {
-      const res = await api.captureVisit(id, token);
+      const res = await api.captureVisit(id, token, audio);
       setVisitOut(res.transcript);
+      setVisitSource(String(res.transcription?.source ?? ""));
       setBriefing(res.briefing);
       await load();
       setTab("Talk");
@@ -141,6 +195,60 @@ export default function PatientRoomPage() {
       setError(e instanceof Error ? e.message : "Visit capture failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runRxAnalyze() {
+    if (!token || !rxName.trim() || !rxDose.trim()) return;
+    setRxBusy(true);
+    setError(null);
+    try {
+      const res = await api.analyzeRx(
+        id,
+        {
+          name: rxName.trim(),
+          dose: rxDose.trim(),
+          frequency: rxFreq.trim(),
+          reason: rxReason.trim(),
+        },
+        token
+      );
+      setRxAnalysis(res);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Rx analysis failed");
+    } finally {
+      setRxBusy(false);
+    }
+  }
+
+  async function commitRx() {
+    if (!token || !rxName.trim() || !rxDose.trim()) return;
+    setRxBusy(true);
+    setError(null);
+    try {
+      await api.addRx(
+        id,
+        {
+          name: rxName.trim(),
+          dose: rxDose.trim(),
+          frequency: rxFreq.trim(),
+          reason: rxReason.trim(),
+          analysis_severity: rxAnalysis?.severity,
+        },
+        token
+      );
+      setRxName("");
+      setRxDose("");
+      setRxFreq("");
+      setRxReason("");
+      setRxAnalysis(null);
+      await load();
+      setTab("Overview");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add prescription");
+    } finally {
+      setRxBusy(false);
     }
   }
 
@@ -155,9 +263,15 @@ export default function PatientRoomPage() {
           snapshot: data.snapshot,
           graph: data.graph,
           tasks: data.tasks,
+          attention: data.attention,
+          handoff: data.handoff,
+          team_activity: data.team_activity,
           room_messages: (data.room?.messages || []).slice(-12),
           visit_transcript: visitOut,
           active_tab: tab,
+          rx_draft: rxAnalysis
+            ? { proposed: rxAnalysis.proposed, severity: rxAnalysis.severity }
+            : null,
         }
       : {},
     !!data
@@ -198,6 +312,18 @@ export default function PatientRoomPage() {
                   {u.label}
                 </span>
               ))}
+            </div>
+          )}
+          {data.attention && data.attention.level !== "clear" && (
+            <div
+              className={`mt-3 inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-xs font-semibold ${attentionClass(
+                data.attention.level
+              )}`}
+            >
+              <span>{data.attention.badge}</span>
+              <span className="font-normal opacity-80">
+                {data.attention.flags[0]?.title || "Team review"}
+              </span>
             </div>
           )}
         </div>
@@ -250,6 +376,63 @@ export default function PatientRoomPage() {
             For the patient: {briefing.for_patient}
           </p>
         </section>
+      )}
+
+      {!!(data.team_activity?.length || data.attention?.flags?.length) && (
+        <section className="grid gap-4 lg:grid-cols-2">
+          {!!data.attention?.flags?.length && (
+            <div className="card p-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-[var(--muted)]">
+                Shared chart attention
+              </p>
+              <ul className="mt-3 space-y-2">
+                {data.attention.flags.map((f) => (
+                  <li
+                    key={f.code + f.title}
+                    className={`rounded-lg border px-3 py-2 text-sm ${attentionClass(f.level)}`}
+                  >
+                    <p className="font-semibold">{f.title}</p>
+                    <p className="mt-0.5 text-xs opacity-90">{f.detail}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {!!data.team_activity?.length && (
+            <div className="card p-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-[var(--muted)]">
+                Who&apos;s been in this room
+              </p>
+              <ul className="mt-3 space-y-2">
+                {data.team_activity.slice(0, 6).map((t) => (
+                  <li
+                    key={t.id}
+                    className="flex items-start justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm"
+                  >
+                    <div>
+                      <p className="font-semibold">
+                        {t.label}
+                        {t.viewing_now && (
+                          <span className="ml-2 text-[10px] font-bold uppercase text-emerald-700">
+                            live
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-[var(--muted)]">{t.detail}</p>
+                    </div>
+                    <span className="shrink-0 text-[10px] text-[var(--muted)]">
+                      {t.at ? new Date(t.at).toLocaleTimeString() : "—"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+
+      {error && (
+        <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</p>
       )}
 
       <nav className="flex w-full flex-wrap gap-1 rounded-2xl border border-[var(--line)] bg-white p-1 sm:rounded-full">
@@ -370,25 +553,163 @@ export default function PatientRoomPage() {
       )}
 
       {tab === "Treatments" && (
-        <section className="card p-5">
-          <h2 className="font-display text-lg font-bold">Treatments & plans</h2>
-          <ul className="mt-4 space-y-3">
-            {p.treatments.map((t) => (
-              <li key={t.id} className="rounded-xl bg-slate-50 px-4 py-3">
-                <div className="flex justify-between gap-2">
-                  <p className="font-display text-lg font-bold">{t.name}</p>
-                  <span className="text-xs font-bold uppercase text-[var(--muted)]">
-                    {t.status}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm text-[var(--muted)]">{t.detail}</p>
-                <p className="mt-1 text-xs text-[var(--muted)]">
-                  Led by {doctorName(t.led_by)} · since {t.started}
+        <div className="grid gap-6 xl:grid-cols-2">
+          <section className="card p-5">
+            <h2 className="font-display text-lg font-bold">Treatments & plans</h2>
+            <ul className="mt-4 space-y-3">
+              {p.treatments.map((t) => (
+                <li key={t.id} className="rounded-xl bg-slate-50 px-4 py-3">
+                  <div className="flex justify-between gap-2">
+                    <p className="font-display text-lg font-bold">{t.name}</p>
+                    <span className="text-xs font-bold uppercase text-[var(--muted)]">
+                      {t.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-[var(--muted)]">{t.detail}</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    Led by {doctorName(t.led_by)} · since {t.started}
+                  </p>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-5">
+              <h3 className="font-display text-base font-bold">Active medicines</h3>
+              <ul className="mt-3 space-y-2">
+                {p.prescriptions
+                  .filter((x) => x.status === "active")
+                  .map((rx) => (
+                    <li key={rx.id} className="rounded-xl border border-[var(--line)] px-3 py-2 text-sm">
+                      <p className="font-semibold">
+                        {rx.name}{" "}
+                        <span className="font-normal text-[var(--muted)]">{rx.dose}</span>
+                      </p>
+                      <p className="text-xs text-[var(--muted)]">
+                        {doctorName(rx.prescribed_by)} · {rx.reason}
+                      </p>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          </section>
+
+          {user?.kind === "doctor" ? (
+            <section className="card p-5">
+              <h2 className="font-display text-lg font-bold">Propose a prescription</h2>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                Draft a medicine, run shared-chart safety analysis against conditions and
+                other doctors&apos; Rx, then add it for the whole team.
+              </p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-xs font-semibold text-[var(--muted)]">Medicine</span>
+                  <input
+                    value={rxName}
+                    onChange={(e) => setRxName(e.target.value)}
+                    placeholder="e.g. Ibuprofen"
+                    className="mt-1 w-full rounded-xl border border-[var(--line)] px-3 py-2 text-sm outline-none focus:border-teal-700"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-xs font-semibold text-[var(--muted)]">Dose</span>
+                  <input
+                    value={rxDose}
+                    onChange={(e) => setRxDose(e.target.value)}
+                    placeholder="400 mg"
+                    className="mt-1 w-full rounded-xl border border-[var(--line)] px-3 py-2 text-sm outline-none focus:border-teal-700"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-xs font-semibold text-[var(--muted)]">Frequency</span>
+                  <input
+                    value={rxFreq}
+                    onChange={(e) => setRxFreq(e.target.value)}
+                    placeholder="twice daily"
+                    className="mt-1 w-full rounded-xl border border-[var(--line)] px-3 py-2 text-sm outline-none focus:border-teal-700"
+                  />
+                </label>
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-xs font-semibold text-[var(--muted)]">Reason</span>
+                  <input
+                    value={rxReason}
+                    onChange={(e) => setRxReason(e.target.value)}
+                    placeholder="Why this medicine?"
+                    className="mt-1 w-full rounded-xl border border-[var(--line)] px-3 py-2 text-sm outline-none focus:border-teal-700"
+                  />
+                </label>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={rxBusy || !rxName.trim() || !rxDose.trim()}
+                  onClick={runRxAnalyze}
+                  className="rounded-xl bg-[var(--ink)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40"
+                >
+                  {rxBusy ? "Analyzing…" : "Analyze safety"}
+                </button>
+                <button
+                  type="button"
+                  disabled={rxBusy || !rxName.trim() || !rxDose.trim() || !rxAnalysis}
+                  onClick={commitRx}
+                  className="rounded-xl bg-[var(--brand)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40"
+                >
+                  Add to shared chart
+                </button>
+              </div>
+              {!data.openai_rx?.enabled && (
+                <p className="mt-3 text-xs text-[var(--muted)]">
+                  Using built-in safety checks (set OPENAI_API_KEY for deeper analysis).
                 </p>
-              </li>
-            ))}
-          </ul>
-        </section>
+              )}
+              {rxAnalysis && (
+                <div
+                  className={`mt-4 rounded-xl border p-4 ${severityClass(rxAnalysis.severity)}`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-display text-base font-bold capitalize">
+                      {rxAnalysis.severity}
+                    </p>
+                    <span className="text-[10px] font-semibold uppercase opacity-70">
+                      {rxAnalysis.engine || "analysis"}
+                      {rxAnalysis.impacts_other_regimens ? " · other doctors" : ""}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm">{rxAnalysis.summary}</p>
+                  <p className="mt-2 text-sm font-medium">{rxAnalysis.recommendation}</p>
+                  {!!rxAnalysis.findings?.length && (
+                    <ul className="mt-3 space-y-2">
+                      {rxAnalysis.findings.map((f, i) => (
+                        <li
+                          key={`${f.title}-${i}`}
+                          className="rounded-lg bg-white/70 px-3 py-2 text-sm"
+                        >
+                          <p className="font-semibold">
+                            {f.title}
+                            {f.affects_other_doctors && (
+                              <span className="ml-2 text-[10px] font-bold uppercase text-amber-800">
+                                cross-doctor
+                              </span>
+                            )}
+                          </p>
+                          <p className="mt-0.5 text-xs opacity-90">{f.detail}</p>
+                          {!!f.related_doctors?.length && (
+                            <p className="mt-1 text-[10px] text-[var(--muted)]">
+                              Related: {f.related_doctors.join(", ")}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </section>
+          ) : (
+            <section className="card p-5 text-sm text-[var(--muted)]">
+              Only doctors can propose prescriptions. You can still see the shared medicine
+              list and treatments.
+            </section>
+          )}
+        </div>
       )}
 
       {tab === "Team" && (
@@ -492,24 +813,49 @@ export default function PatientRoomPage() {
         <section className="card p-5 space-y-4">
           <h2 className="font-display text-lg font-bold">Capture a visit</h2>
           <p className="text-sm text-[var(--muted)]">
-            Record (or run a demo visit). Speech becomes a shared note the whole team can
-            see — so the patient never has to retell what was said in the room.
+            Record the conversation in the room. Speech becomes a shared note the whole team
+            can see — so the patient never has to retell what was said.
           </p>
           {user?.kind === "doctor" ? (
-            <button
-              onClick={runVisitDemo}
-              disabled={busy}
-              className="rounded-xl bg-[var(--ink)] px-5 py-3 text-sm font-bold text-white disabled:opacity-50"
-            >
-              {busy ? "Working…" : "Run visit capture"}
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              {recording ? (
+                <button
+                  onClick={stopRecording}
+                  className="flex items-center gap-2.5 rounded-xl bg-rose-600 px-5 py-3 text-sm font-bold text-white"
+                >
+                  <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-white" />
+                  Stop and save · {Math.floor(recSeconds / 60)}:
+                  {String(recSeconds % 60).padStart(2, "0")}
+                </button>
+              ) : (
+                <button
+                  onClick={startRecording}
+                  disabled={busy}
+                  className="flex items-center gap-2.5 rounded-xl bg-[var(--ink)] px-5 py-3 text-sm font-bold text-white disabled:opacity-50"
+                >
+                  <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
+                  {busy ? "Transcribing…" : "Record visit"}
+                </button>
+              )}
+              {!recording && (
+                <button
+                  onClick={() => runVisitDemo()}
+                  disabled={busy}
+                  className="rounded-xl border border-[var(--line)] px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Use demo visit
+                </button>
+              )}
+            </div>
           ) : (
             <p className="text-sm text-[var(--muted)]">Only doctors can capture visits.</p>
           )}
           {visitOut && (
             <div className="rounded-xl bg-slate-50 p-4 text-sm">
-              <p className="text-xs font-bold uppercase text-[var(--muted)]">Transcript</p>
-              <p className="mt-2">{visitOut}</p>
+              <p className="text-xs font-bold uppercase text-[var(--muted)]">
+                Transcript{visitSource === "muse_voice" ? " · Muse Voice" : " · demo"}
+              </p>
+              <p className="mt-2 whitespace-pre-line">{visitOut}</p>
             </div>
           )}
         </section>

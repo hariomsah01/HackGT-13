@@ -93,6 +93,42 @@ export const api = {
       "/api/ask",
       { method: "POST", token, body: JSON.stringify(body) }
     ),
+  handoffs: (token: string) =>
+    req<{
+      handoffs: import("./types").HandoffPack[];
+      attention_counts: Record<string, number>;
+      updated_at: string;
+    }>("/api/handoffs", { token }),
+  analyzeRx: (
+    patientId: string,
+    body: { name: string; dose: string; frequency: string; reason: string },
+    token: string
+  ) =>
+    req<import("./types").RxAnalysis>(`/api/patients/${patientId}/rx/analyze`, {
+      method: "POST",
+      token,
+      body: JSON.stringify(body),
+    }),
+  addRx: (
+    patientId: string,
+    body: {
+      name: string;
+      dose: string;
+      frequency: string;
+      reason: string;
+      analysis_severity?: string;
+    },
+    token: string
+  ) =>
+    req<{
+      patient: import("./types").Patient;
+      prescription: import("./types").Prescription;
+      attention: import("./types").Attention;
+    }>(`/api/patients/${patientId}/rx`, {
+      method: "POST",
+      token,
+      body: JSON.stringify(body),
+    }),
   wsUrl: (patientId: string, token: string) => {
     const base = API.replace(/^http/, "ws");
     return `${base}/api/ws/${patientId}?token=${encodeURIComponent(token)}`;
