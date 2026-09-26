@@ -7,11 +7,10 @@ export interface SessionUser {
   role: string;
   specialty: string;
   color: string;
+  chart_id?: string | null;
 }
 
-export interface PublicUser extends SessionUser {
-  pin_hint: string;
-}
+export type PublicUser = SessionUser;
 
 export interface Condition {
   id: string;
@@ -100,6 +99,8 @@ export interface RoomMessage {
   author_label: string;
   text: string;
   timestamp: string;
+  to_id?: string | null;
+  to_label?: string | null;
 }
 
 export interface CareRoom {
@@ -182,6 +183,8 @@ export interface AttentionFlag {
   code: string;
   title: string;
   detail: string;
+  patient_title?: string;
+  patient_detail?: string;
 }
 
 export interface Attention {

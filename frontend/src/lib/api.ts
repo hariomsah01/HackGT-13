@@ -40,10 +40,23 @@ export const api = {
     req<import("./types").Patient>("/api/patients", { method: "POST", token }),
   openPatient: (id: string, token: string) =>
     req<import("./types").PatientBundle>(`/api/patients/${id}`, { token }),
-  postMessage: (id: string, text: string, token: string) =>
+  postMessage: (
+    id: string,
+    text: string,
+    token: string,
+    to?: { to_id?: string | null; to_label?: string | null }
+  ) =>
     req<{ room: import("./types").CareRoom; briefing: import("./types").Briefing }>(
       `/api/patients/${id}/messages`,
-      { method: "POST", token, body: JSON.stringify({ text }) }
+      {
+        method: "POST",
+        token,
+        body: JSON.stringify({
+          text,
+          to_id: to?.to_id ?? null,
+          to_label: to?.to_label ?? null,
+        }),
+      }
     ),
   addNote: (id: string, text: string, token: string) =>
     req<import("./types").Patient>(`/api/patients/${id}/notes`, {
