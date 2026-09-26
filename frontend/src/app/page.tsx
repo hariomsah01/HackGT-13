@@ -427,7 +427,7 @@ export default function HomePage() {
       </section>
 
       {/* CTA */}
-      <section className="relative z-[1]">
+      <section id="sign-in" className="relative z-[1] scroll-mt-24">
         <div className="site-wrap pb-20 lg:pb-28">
           <div className="relative flex flex-wrap items-center justify-between gap-8 overflow-hidden rounded-[2.5rem] bg-[var(--brand)] px-[clamp(1.75rem,5vw,6rem)] py-[clamp(3rem,5vw,6rem)] text-white">
             <div className="absolute -right-20 -top-20 h-80 w-80 rounded-full bg-white/10 blur-3xl" aria-hidden />

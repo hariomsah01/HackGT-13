@@ -14,7 +14,7 @@ const doctorTabs = [
 
 const patientTabs = [
   { href: "/app/me", label: "My care", hint: "Your chart" },
-  { href: "/app/updates", label: "Updates", hint: "Team activity" },
+  { href: "/app/updates", label: "Updates", hint: "Your care overview" },
 ];
 
 function Mark({ light = false }: { light?: boolean }) {
@@ -145,19 +145,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               ))}
             </nav>
 
-            {/* Desktop content header strip — full remaining width */}
-            <div className="hidden w-full border-b border-[var(--line)] bg-white px-[var(--pad)] py-3 md:flex md:items-center md:justify-between">
-              <p className="text-sm text-[var(--muted)]">
-                Shared care space · live across Doctors A–D
-              </p>
-              <p className="text-sm font-semibold text-[var(--ink)]">
-                {user.label}
-                <span className="ml-2 font-normal text-[var(--muted)]">
-                  · {user.specialty || user.role}
-                </span>
-              </p>
-            </div>
-
             <div className="flex w-full min-w-0 max-w-none flex-1 flex-col">
               {children}
             </div>
@@ -186,9 +173,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 >
                   Sign out
                 </button>
-              ) : (
+              ) : pathname === "/login" ? null : (
                 <Link
-                  href="/login"
+                  href={pathname === "/" ? "#sign-in" : "/#sign-in"}
                   className="rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-bold text-white"
                 >
                   Sign in
