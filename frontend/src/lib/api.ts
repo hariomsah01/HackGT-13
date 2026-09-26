@@ -1,4 +1,6 @@
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === "production" ? "/api/backend" : "http://localhost:8000");
 
 async function req<T>(
   path: string,
@@ -213,7 +215,9 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
   wsUrl: (patientId: string, token: string) => {
-    const base = API.replace(/^http/, "ws");
+    const base = API.startsWith("/")
+      ? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}${API}`
+      : API.replace(/^http/, "ws");
     return `${base}/api/ws/${patientId}?token=${encodeURIComponent(token)}`;
   },
 };

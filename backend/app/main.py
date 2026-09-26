@@ -7,6 +7,28 @@ from app.services.engine import CareEngine
 from app.services.store import CareStore
 
 
+VERCEL_PREFIX = "/api/backend"
+
+
+class StripPrefixMiddleware:
+    """Vercel forwards /api/backend/... to this service; routes are mounted at /api/..."""
+
+    def __init__(self, app, prefix: str) -> None:
+        self.app = app
+        self.prefix = prefix
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            path = scope.get("path", "")
+            if path == self.prefix or path.startswith(self.prefix + "/"):
+                scope = dict(scope)
+                scope["path"] = path[len(self.prefix):] or "/"
+                raw = scope.get("raw_path")
+                if raw:
+                    scope["raw_path"] = raw[len(self.prefix):] or b"/"
+        await self.app(scope, receive, send)
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
@@ -22,6 +44,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(StripPrefixMiddleware, prefix=VERCEL_PREFIX)
     app.state.engine = CareEngine(CareStore())
     app.state.settings = settings
     app.include_router(router)

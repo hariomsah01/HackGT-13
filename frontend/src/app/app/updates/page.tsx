@@ -729,7 +729,7 @@ function PatientMetrics({
                 Treatment plans
               </h2>
               <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {p.treatments.map((t, i) => (
+                {p.treatments.map((t) => (
                   <article
                     key={t.id}
                     className="rounded-2xl bg-[var(--paper)] px-4 py-4"

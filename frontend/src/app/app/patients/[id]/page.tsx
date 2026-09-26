@@ -49,7 +49,6 @@ export default function PatientRoomPage() {
   const [visitOut, setVisitOut] = useState<string | null>(null);
   const [visitSource, setVisitSource] = useState<string | null>(null);
   const [officeCalls, setOfficeCalls] = useState<OfficeCall[]>([]);
-  const [callBusy, setCallBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const recorderRef = useRef<VisitRecorder | null>(null);
@@ -119,8 +118,12 @@ export default function PatientRoomPage() {
     const ping = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ping" }));
     }, 15000);
+    const poll = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) load().catch(() => {});
+    }, 8000);
     return () => {
       clearInterval(ping);
+      clearInterval(poll);
       ws.onmessage = null;
       if (ws.readyState === WebSocket.CONNECTING) {
         // Closing mid-handshake makes the browser log an error; close once it opens instead.
@@ -1110,7 +1113,7 @@ export default function PatientRoomPage() {
                 ) : (
                   <button
                     type="button"
-                    disabled={busy || callBusy}
+                    disabled={busy}
                     onClick={startRecording}
                     className="flex items-center gap-2.5 rounded-xl bg-[var(--ink)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
                   >
@@ -1121,7 +1124,7 @@ export default function PatientRoomPage() {
                 {!recording && (
                   <button
                     type="button"
-                    disabled={busy || callBusy}
+                    disabled={busy}
                     onClick={() => runVisitDemo()}
                     className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
