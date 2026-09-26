@@ -338,89 +338,6 @@ export default function MePage() {
               </ul>
             </section>
 
-            <section className="rounded-[1.75rem] border border-[var(--line)] bg-white p-[clamp(1.25rem,2vw,2rem)] shadow-[0_16px_40px_rgba(15,23,42,0.05)] lg:col-span-12">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
-                Call the office
-              </p>
-              <h2 className="font-display mt-2 text-[clamp(1.35rem,1.8vw,1.85rem)] font-bold tracking-tight">
-                When your doctor is unavailable
-              </h2>
-              <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
-                Call any doctor&apos;s office. A health assistant takes the conversation and
-                sends your doctor an insight so they can reply to you in private chat.
-              </p>
-              <form onSubmit={callOffice} className="mt-6 grid gap-3 sm:grid-cols-2">
-                <label className="block">
-                  <span className="text-sm font-semibold text-[var(--ink)]">Office</span>
-                  <select
-                    value={callDoctorId}
-                    onChange={(e) => setCallDoctorId(e.target.value)}
-                    className="mt-1.5 w-full rounded-2xl border border-[var(--line)] bg-[var(--paper)] px-4 py-3 text-sm outline-none focus:border-[var(--brand)] focus:bg-white"
-                  >
-                    {p.team.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                        {m.specialty ? ` · ${m.specialty}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block sm:col-span-2">
-                  <span className="text-sm font-semibold text-[var(--ink)]">
-                    Why are you calling?
-                  </span>
-                  <input
-                    value={callReason}
-                    onChange={(e) => setCallReason(e.target.value)}
-                    placeholder="Appointment, checkup, symptoms…"
-                    className="mt-1.5 w-full rounded-2xl border border-[var(--line)] bg-[var(--paper)] px-4 py-3 text-sm outline-none focus:border-[var(--brand)] focus:bg-white"
-                  />
-                </label>
-                <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-                  {callRecording ? (
-                    <button
-                      type="button"
-                      onClick={stopCallRecording}
-                      className="flex items-center gap-2.5 rounded-2xl bg-rose-600 px-6 py-3 text-sm font-bold text-white"
-                    >
-                      <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-white" />
-                      Hang up and send · {Math.floor(callSeconds / 60)}:
-                      {String(callSeconds % 60).padStart(2, "0")}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={callBusy}
-                      onClick={startCallRecording}
-                      className="flex items-center gap-2.5 rounded-2xl bg-[var(--ink)] px-6 py-3 text-sm font-bold text-white disabled:opacity-40"
-                    >
-                      <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-                      {callBusy ? "Transcribing with Muse…" : "Start recorded call"}
-                    </button>
-                  )}
-                  {!callRecording && (
-                    <button
-                      type="submit"
-                      disabled={callBusy}
-                      className="rounded-2xl border border-[var(--line)] px-6 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                    >
-                      Send without recording
-                    </button>
-                  )}
-                  <span className="text-xs text-[var(--muted)]">
-                    {bundle?.muse?.enabled
-                      ? "Recorded calls are transcribed by Meta Muse Voice."
-                      : "Muse key not set, recordings use a demo transcript."}
-                  </span>
-                </div>
-              </form>
-              {callNote && (
-                <p className="mt-4 rounded-2xl bg-teal-50 px-4 py-3 text-sm text-teal-950">
-                  {callNote}
-                </p>
-              )}
-            </section>
-
             <section
               id="message-team"
               className="scroll-mt-24 rounded-[1.75rem] border border-[var(--line)] bg-white p-[clamp(1.25rem,2vw,2rem)] shadow-[0_16px_40px_rgba(15,23,42,0.05)] lg:col-span-12"
@@ -539,6 +456,89 @@ export default function MePage() {
                     ))}
                   </ul>
                 </div>
+              )}
+            </section>
+
+            <section className="rounded-[1.75rem] border border-[var(--line)] bg-white p-[clamp(1.25rem,2vw,2rem)] shadow-[0_16px_40px_rgba(15,23,42,0.05)] lg:col-span-12">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
+                Call the office
+              </p>
+              <h2 className="font-display mt-2 text-[clamp(1.35rem,1.8vw,1.85rem)] font-bold tracking-tight">
+                When your doctor is unavailable
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
+                Call any doctor&apos;s office. A health assistant takes the conversation and
+                sends your doctor an insight so they can reply to you in private chat.
+              </p>
+              <form onSubmit={callOffice} className="mt-6 grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="text-sm font-semibold text-[var(--ink)]">Office</span>
+                  <select
+                    value={callDoctorId}
+                    onChange={(e) => setCallDoctorId(e.target.value)}
+                    className="mt-1.5 w-full rounded-2xl border border-[var(--line)] bg-[var(--paper)] px-4 py-3 text-sm outline-none focus:border-[var(--brand)] focus:bg-white"
+                  >
+                    {p.team.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                        {m.specialty ? ` · ${m.specialty}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="text-sm font-semibold text-[var(--ink)]">
+                    Why are you calling?
+                  </span>
+                  <input
+                    value={callReason}
+                    onChange={(e) => setCallReason(e.target.value)}
+                    placeholder="Appointment, checkup, symptoms…"
+                    className="mt-1.5 w-full rounded-2xl border border-[var(--line)] bg-[var(--paper)] px-4 py-3 text-sm outline-none focus:border-[var(--brand)] focus:bg-white"
+                  />
+                </label>
+                <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
+                  {callRecording ? (
+                    <button
+                      type="button"
+                      onClick={stopCallRecording}
+                      className="flex items-center gap-2.5 rounded-2xl bg-rose-600 px-6 py-3 text-sm font-bold text-white"
+                    >
+                      <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-white" />
+                      Hang up and send · {Math.floor(callSeconds / 60)}:
+                      {String(callSeconds % 60).padStart(2, "0")}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={callBusy}
+                      onClick={startCallRecording}
+                      className="flex items-center gap-2.5 rounded-2xl bg-[var(--ink)] px-6 py-3 text-sm font-bold text-white disabled:opacity-40"
+                    >
+                      <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
+                      {callBusy ? "Transcribing with Muse…" : "Start recorded call"}
+                    </button>
+                  )}
+                  {!callRecording && (
+                    <button
+                      type="submit"
+                      disabled={callBusy}
+                      className="rounded-2xl border border-[var(--line)] px-6 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      Send without recording
+                    </button>
+                  )}
+                  <span className="text-xs text-[var(--muted)]">
+                    {bundle?.muse?.enabled
+                      ? "Recorded calls are transcribed by Meta Muse Voice."
+                      : "Muse key not set, recordings use a demo transcript."}
+                  </span>
+                </div>
+              </form>
+              {callNote && (
+                <p className="mt-4 rounded-2xl bg-teal-50 px-4 py-3 text-sm text-teal-950">
+                  {callNote}
+                </p>
               )}
             </section>
           </div>
