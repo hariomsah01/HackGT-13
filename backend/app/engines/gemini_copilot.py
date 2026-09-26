@@ -55,8 +55,14 @@ You answer using PLATFORM CONTEXT below (the whole care space) and the current r
 You may use any patient chart, insight totals, activity, briefing, or team data in the context —
 not only what is literally visible on the current page.
 Do not invent labs, meds, people, or events that are not in the context.
-If something is missing, say so briefly and suggest where in ClearPath to look (Patients, Insights, Updates, a patient room).
-Be concise: 3–6 short sentences. Plain language. No bullet walls unless listing medicines/conditions/patients.
+If something is missing, say so in one line and name where in ClearPath to look (Patients, Insights, Updates, a patient room).
+
+FORMAT (strict):
+- Line 1: the direct answer in one short sentence. No preamble, no restating the question.
+- Then, only if it adds value, up to 4 bullets starting with "- ", each under 15 words.
+- Optionally a final line starting with "Next: " naming one concrete step and its owner.
+- Use **bold** only for patient, doctor, or medicine names. No headings, tables, emojis, or sign-offs.
+- Under 80 words total. Plain language.
 Never say you are an AI model. Never mention Gemini.
 Viewer: {viewer_label}
 Current route: {route}
@@ -67,7 +73,10 @@ PLATFORM CONTEXT (JSON):
 Question: {q}
 """
         try:
-            resp = self._model.generate_content(prompt)
+            resp = self._model.generate_content(
+                prompt,
+                generation_config={"temperature": 0.2},
+            )
             text = (resp.text or "").strip()
             return {
                 "answer": text or fallback,
@@ -114,6 +123,22 @@ Question: {q}
                     f"avg bond {totals.get('avg_bond', '—')}."
                 )
             return "Open Insights for live totals across the care space."
+
+        if any(w in ql for w in ("attention", "handoff", "need review", "which patient", "needs care")):
+            attn = screen.get("attention") or (patient.get("attention") if isinstance(patient, dict) else None)
+            handoffs = platform.get("handoffs") or screen.get("handoffs") or []
+            if attn and attn.get("badge") and label:
+                return f"{label} attention: {attn.get('badge')} — {(attn.get('flags') or [{}])[0].get('detail', 'See the patient room.')}"
+            if handoffs:
+                bits = [
+                    f"{h.get('patient_label')}: {h.get('open_question') or h.get('attention', {}).get('badge', 'review')}"
+                    for h in handoffs[:5]
+                ]
+                return "Patients needing team attention — " + " · ".join(bits)
+            needs = totals.get("needs_attention")
+            if needs is not None:
+                return f"{needs} patient chart(s) currently need review. Open Patients or Updates for handoffs."
+            return "Open Updates for open handoffs, or Patients for attention badges."
 
         if any(w in ql for w in ("activity", "update", "what happened", "recent")):
             if activity:
