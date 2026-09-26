@@ -13,6 +13,13 @@ const SUGGESTIONS = [
   "What should happen next?",
 ];
 
+const PATIENT_SUGGESTIONS = [
+  "What should I know right now?",
+  "Explain my medicines simply",
+  "Any alerts I should watch?",
+  "What did my doctors say?",
+];
+
 function routeLabel(pathname: string): string {
   if (pathname.startsWith("/app/patients/") && pathname !== "/app/patients")
     return "Patient room";
@@ -86,17 +93,21 @@ export function GlobalAsk() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
+  const [inputFade, setInputFade] = useState(false);
   const [history, setHistory] = useState<
     { q: string; a: string; source?: string }[]
   >([]);
   const [live, setLive] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const tab = routeLabel(pathname);
   const patientId =
     patientIdFromPath(pathname) ||
     (typeof pageScreen.patient_id === "string" ? pageScreen.patient_id : undefined);
+  const prompts =
+    user?.kind === "patient" ? PATIENT_SUGGESTIONS : SUGGESTIONS;
 
   useEffect(() => {
     if (open) {
@@ -108,17 +119,39 @@ export function GlobalAsk() {
   useEffect(() => {
     setHistory([]);
     setOpen(false);
+    setQ("");
+    setInputFade(false);
   }, [pathname]);
+
+  useEffect(() => {
+    return () => {
+      if (fadeTimer.current) clearTimeout(fadeTimer.current);
+    };
+  }, []);
 
   if (!token || !user) return null;
 
   const viewerLabel = user.label;
   const authToken = token;
 
+  function fadeOutQuestion(displayText: string) {
+    if (fadeTimer.current) clearTimeout(fadeTimer.current);
+    setQ(displayText);
+    setInputFade(false);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => setInputFade(true));
+    });
+    fadeTimer.current = setTimeout(() => {
+      setQ("");
+      setInputFade(false);
+    }, 340);
+  }
+
   async function ask(question?: string) {
     const text = (question ?? q).trim();
-    if (!text) return;
+    if (!text || busy) return;
     setBusy(true);
+    fadeOutQuestion(text);
     try {
       const visible =
         typeof document !== "undefined"
@@ -145,7 +178,6 @@ export function GlobalAsk() {
         ...h.slice(-5),
         { q: text, a: res.answer, source: res.source },
       ]);
-      setQ("");
     } catch (e) {
       setHistory((h) => [
         ...h.slice(-5),
@@ -185,10 +217,6 @@ export function GlobalAsk() {
           <div className="flex items-start justify-between gap-3 border-b border-[var(--line)] bg-gradient-to-b from-slate-50 to-white px-4 py-3.5">
             <div className="min-w-0">
               <p className="font-display text-base font-bold tracking-tight">Ask</p>
-              <p className="mt-0.5 truncate text-[11px] text-[var(--muted)]">
-                Whole care space · {tab}
-                {patientId ? " · focused chart" : ""}
-              </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {live && (
@@ -207,13 +235,31 @@ export function GlobalAsk() {
           </div>
 
           <div className="max-h-80 flex-1 space-y-3 overflow-y-auto px-4 py-3">
-            {!history.length && !busy && (
+            {history.map((h, i) => (
+              <div key={`${h.q}-${i}`} className="space-y-1.5 text-sm">
+                <p className="rounded-xl bg-[var(--ink)] px-3 py-2 text-white">{h.q}</p>
+                <div className="rounded-xl border border-[var(--line)] bg-slate-50/80 px-3 py-2.5 leading-relaxed text-slate-700">
+                  <AnswerBody text={h.a} />
+                </div>
+              </div>
+            ))}
+            {busy && (
+              <p className="animate-pulse text-xs text-[var(--muted)]">
+                Give me one second, I am getting you the right information…
+              </p>
+            )}
+            {!busy && (
               <div>
-                <p className="mb-2 text-xs text-[var(--muted)]">
-                  Ask about any patient, medicine, or team handoff — not just this page.
-                </p>
+                {!history.length && (
+                  <p className="mb-2 text-xs text-[var(--muted)]">
+                    Try a question to get started.
+                  </p>
+                )}
+                {!!history.length && (
+                  <p className="mb-2 text-xs text-[var(--muted)]">Ask another</p>
+                )}
                 <div className="flex flex-wrap gap-1.5">
-                  {SUGGESTIONS.map((s) => (
+                  {prompts.map((s) => (
                     <button
                       key={s}
                       type="button"
@@ -226,19 +272,6 @@ export function GlobalAsk() {
                 </div>
               </div>
             )}
-            {history.map((h, i) => (
-              <div key={`${h.q}-${i}`} className="space-y-1.5 text-sm">
-                <p className="rounded-xl bg-[var(--ink)] px-3 py-2 text-white">{h.q}</p>
-                <div className="rounded-xl border border-[var(--line)] bg-slate-50/80 px-3 py-2.5 leading-relaxed text-slate-700">
-                  <AnswerBody text={h.a} />
-                </div>
-              </div>
-            ))}
-            {busy && (
-              <p className="animate-pulse text-xs text-[var(--muted)]">
-                Looking across ClearPath…
-              </p>
-            )}
             <div ref={bottomRef} />
           </div>
 
@@ -246,14 +279,20 @@ export function GlobalAsk() {
             <input
               ref={inputRef}
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => {
+                if (inputFade) return;
+                setQ(e.target.value);
+              }}
               onKeyDown={(e) => e.key === "Enter" && !busy && ask()}
-              placeholder="Ask about anyone or anything here…"
-              className="flex-1 rounded-xl border border-[var(--line)] px-3 py-2.5 text-sm outline-none focus:border-teal-700"
+              placeholder="Type a question…"
+              disabled={busy}
+              className={`flex-1 rounded-xl border border-[var(--line)] px-3 py-2.5 text-sm outline-none transition-opacity duration-300 focus:border-teal-700 disabled:cursor-default ${
+                inputFade ? "opacity-0" : "opacity-100"
+              }`}
             />
             <button
               type="button"
-              disabled={busy || !q.trim()}
+              disabled={busy || (!q.trim() && !inputFade)}
               onClick={() => ask()}
               className="rounded-xl bg-[var(--brand)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40"
             >
