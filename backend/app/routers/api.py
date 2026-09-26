@@ -16,7 +16,14 @@ from fastapi import (
 )
 
 from app.engines.auth import authenticate, list_users_public, verify_token
-from app.models.schemas import AskRequest, LoginRequest, MessageRequest, NoteRequest
+from app.models.schemas import (
+    AskRequest,
+    LoginRequest,
+    MessageRequest,
+    NoteRequest,
+    RxAddRequest,
+    RxProposeRequest,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -43,6 +50,7 @@ def health(request: Request):
         "product": "ClearPath Care Space",
         "muse": e.muse.enabled,
         "gemini": e.ask.enabled,
+        "openai_rx": e.rx.enabled,
     }
 
 
@@ -68,20 +76,7 @@ def me(authorization: Optional[str] = Header(default=None)):
 @router.get("/patients")
 def list_patients(request: Request, authorization: Optional[str] = Header(default=None)):
     user_from(authorization)
-    e = eng(request)
-    return [
-        {
-            "id": p.id,
-            "label": p.label,
-            "age": p.age,
-            "conditions": [c.name for c in p.conditions],
-            "active_prescriptions": len(
-                [x for x in p.prescriptions if x.status == "active"]
-            ),
-            "team": [m.label for m in p.team],
-        }
-        for p in e.store.list_patients()
-    ]
+    return eng(request).list_patients_enriched()
 
 
 @router.post("/patients")
@@ -232,6 +227,67 @@ def ask_screen(
         body.tab,
         body.screen,
     )
+
+
+@router.get("/handoffs")
+def handoffs(
+    request: Request, authorization: Optional[str] = Header(default=None)
+):
+    """Open questions + attention across the shared care space."""
+    user_from(authorization)
+    analytics = eng(request).analytics()
+    return {
+        "handoffs": analytics.get("handoffs") or [],
+        "attention_counts": analytics.get("attention_counts") or {},
+        "updated_at": analytics.get("updated_at"),
+    }
+
+
+@router.post("/patients/{patient_id}/rx/analyze")
+def analyze_rx(
+    patient_id: str,
+    body: RxProposeRequest,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Analyze a proposed prescription against the shared multi-doctor chart."""
+    user = user_from(authorization)
+    e = eng(request)
+    try:
+        return e.analyze_prescription(
+            patient_id,
+            user,
+            body.name,
+            body.dose,
+            body.frequency,
+            body.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/patients/{patient_id}/rx")
+def add_rx(
+    patient_id: str,
+    body: RxAddRequest,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Add a prescription to the shared chart after (optional) analysis."""
+    user = user_from(authorization)
+    e = eng(request)
+    try:
+        return e.add_prescription(
+            patient_id,
+            user,
+            body.name,
+            body.dose,
+            body.frequency,
+            body.reason,
+            body.analysis_severity,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 # ── Real-time room WebSocket ─────────────────────────────────

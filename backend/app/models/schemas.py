@@ -121,3 +121,22 @@ class AskRequest(BaseModel):
     patient_id: Optional[str] = None
     tab: Optional[str] = None
     screen: dict[str, Any] = Field(default_factory=dict)
+
+
+class RxProposeRequest(BaseModel):
+    """Doctor drafts a prescription for shared-chart safety analysis."""
+
+    name: str
+    dose: str
+    frequency: str = ""
+    reason: str = ""
+
+
+class RxAddRequest(BaseModel):
+    """Commit a prescription to the shared chart after analysis."""
+
+    name: str
+    dose: str
+    frequency: str = ""
+    reason: str = ""
+    analysis_severity: Optional[str] = None

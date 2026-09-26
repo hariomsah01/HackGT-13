@@ -8,7 +8,9 @@ class Settings(BaseSettings):
     muse_spark_model: str = "muse-spark-1.3"
     muse_voice_model: str = "muse-voice-transcribe-1.0"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.8-flash"
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
     cors_origins: str = "http://localhost:3000"
 
     @property
@@ -18,6 +20,10 @@ class Settings(BaseSettings):
     @property
     def gemini_enabled(self) -> bool:
         return bool(self.gemini_api_key.strip())
+
+    @property
+    def openai_enabled(self) -> bool:
+        return bool(self.openai_api_key.strip())
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

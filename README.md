@@ -17,7 +17,13 @@
 ```bash
 cd backend
 pip install -r requirements.txt
-# optional: set MODEL_API_KEY in .env (from https://dev.meta.ai)
+# optional keys in backend/.env (never commit secrets):
+#   MODEL_API_KEY=...          # Muse Spark / Voice
+#   GEMINI_API_KEY=...         # Platform Ask
+#   GEMINI_MODEL=gemini-3.8-flash
+#   OPENAI_API_KEY=...         # Prescription safety analysis
+#   OPENAI_MODEL=gpt-4o-mini
+# Copy from .env.example — Ask and Rx analysis fall back to chart/heuristics without keys.
 uvicorn app.main:app --reload --port 8000
 
 cd frontend
@@ -34,8 +40,8 @@ npm install && npm run dev
 ## Demo (Meta video)
 
 1. **Problem (30s)** — Care is fragmented; patients repeat histories.  
-2. **Product (90s)** — Doctor A & B open Patient 1; Talk; live presence; Team bond; Visit capture → shared note; Patient “My care”.  
-3. **AI (30s)** — Muse Spark tools brief the room; Muse Voice turns speech into shared understanding (never labeled “AI” in UI).  
-4. **Tools (30s)** — Next.js, FastAPI, WebSockets, Meta Model API (`muse-spark-1.3`, `muse-voice-transcribe-1.0`).
+2. **Product (90s)** — Doctor A & B open Patient 1; Talk; live presence; Team bond; Visit capture → shared note; Patient “My care”; propose Rx with shared-chart safety check.  
+3. **AI (30s)** — Muse Spark tools brief the room; Muse Voice turns speech into shared understanding; Ask (Gemini) answers across the care space; Rx analysis flags cross-doctor conflicts (never labeled “AI” in UI).  
+4. **Tools (30s)** — Next.js, FastAPI, WebSockets, Meta Model API (`muse-spark-1.3`, `muse-voice-transcribe-1.0`), Gemini Ask, OpenAI Rx review.
 
 Get $50 Muse credits: [dev.meta.ai](https://dev.meta.ai/)
