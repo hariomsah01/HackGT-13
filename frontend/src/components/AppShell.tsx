@@ -186,9 +186,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">{user.label}</p>
-                  <p className="truncate text-[11px] text-[var(--sidebar-muted)]">
-                    {user.specialty || user.role}
-                  </p>
+                  {user.kind !== "patient" && (
+                    <p className="truncate text-[11px] text-[var(--sidebar-muted)]">
+                      {user.specialty || user.role}
+                    </p>
+                  )}
                 </div>
               </div>
               <button

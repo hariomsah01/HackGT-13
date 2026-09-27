@@ -148,9 +148,11 @@ export default function LoginPage() {
                         <span className="font-display block font-bold tracking-tight text-[var(--ink)]">
                           {u.label}
                         </span>
-                        <span className="block text-sm text-[var(--muted)]">
-                          {u.specialty || u.role}
-                        </span>
+                        {u.kind !== "patient" && (
+                          <span className="block text-sm text-[var(--muted)]">
+                            {u.specialty || u.role}
+                          </span>
+                        )}
                       </span>
                     </button>
                   </li>

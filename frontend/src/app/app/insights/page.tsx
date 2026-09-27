@@ -23,9 +23,8 @@ const COLLAB_KINDS = new Set([
 const RX_KINDS = new Set(["rx_add", "rx_analyze", "rx_stop"]);
 
 const FEED_FILTERS = [
-  { id: "all", label: "All" },
-  { id: "rx", label: "Medicines" },
   { id: "team", label: "Notes & messages" },
+  { id: "rx", label: "Medicines" },
 ] as const;
 
 type FeedFilter = (typeof FEED_FILTERS)[number]["id"];
@@ -103,7 +102,7 @@ function DoctorView() {
   const { token, user, ready } = useAuth();
   const router = useRouter();
   const [data, setData] = useState<Analytics | null>(null);
-  const [filter, setFilter] = useState<FeedFilter>("all");
+  const [filter, setFilter] = useState<FeedFilter>("team");
 
   useAskScreen(
     data
@@ -148,7 +147,7 @@ function DoctorView() {
   const feed = data.activity
     .filter((a) => COLLAB_KINDS.has(a.kind))
     .filter((a) =>
-      filter === "all" ? true : filter === "rx" ? RX_KINDS.has(a.kind) : !RX_KINDS.has(a.kind)
+      filter === "rx" ? RX_KINDS.has(a.kind) : !RX_KINDS.has(a.kind)
     );
 
   return (
