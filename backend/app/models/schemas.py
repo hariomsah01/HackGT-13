@@ -88,6 +88,9 @@ class HuddleMessage(BaseModel):
     timestamp: str
     to_id: Optional[str] = None  # doctor id, or None for whole care team
     to_label: Optional[str] = None
+    kind: Literal["text", "voice"] = "text"
+    audio_id: Optional[str] = None
+    duration_ms: Optional[int] = None
 
 
 class CareRoom(BaseModel):
@@ -174,14 +177,18 @@ class OfficeCall(BaseModel):
     status: Literal["new", "read", "responded"] = "new"
     assistant_label: str = "Office assistant"
     source: str = "demo"
+    recipient_ids: list[str] = Field(default_factory=list)  # every doctor it was sent to
+    recipient_label: str = ""
+    urgency: str = "routine"
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     read_at: Optional[str] = None
 
 
 class DoctorNotification(BaseModel):
     id: str
-    doctor_id: str
-    kind: str  # office_call
+    doctor_id: str  # the doctor it concerns (recipient for office calls, sender for updates)
+    recipient_id: str = ""  # user who sees it; defaults to doctor_id
+    kind: str  # office_call | assistant_conversation | doctor_update
     title: str
     detail: str
     patient_id: str
@@ -196,3 +203,22 @@ class OfficeCallRequest(BaseModel):
     reason: str = ""
     demo: bool = True
     transcript: Optional[str] = None
+
+
+class AssistantTurnText(BaseModel):
+    role: Literal["assistant", "user"]
+    text: str
+
+
+class AssistantSubmitRequest(BaseModel):
+    turns: list[AssistantTurnText]
+    recipient: str = "team"  # "team" or a doctor id
+
+
+class AssistantSendRequest(BaseModel):
+    message: str
+    include_voice: bool = True
+
+
+class PresencePing(BaseModel):
+    watch: list[str] = Field(default_factory=list)  # user ids or patient chart ids

@@ -25,6 +25,10 @@ class CareStore:
         self.presence: dict[str, dict[str, Any]] = {}  # patient_id -> {user_id: meta}
         self.office_calls: dict[str, list[OfficeCall]] = {}  # patient_id -> calls
         self.notifications: dict[str, list[DoctorNotification]] = {}  # doctor_id -> notes
+        self.last_seen: dict[str, str] = {}  # user_id -> iso time of last heartbeat
+        self.offline: set[str] = set()  # users who signed out or closed the app
+        self.voice_audio: dict[str, bytes] = {}  # audio_id -> audio bytes
+        self.voice_mime: dict[str, str] = {}  # audio_id -> content type
         self._seq = 0
 
     def next_patient_index(self) -> int:
@@ -85,6 +89,8 @@ class CareStore:
         text: str,
         to_id: Optional[str] = None,
         to_label: Optional[str] = None,
+        audio_id: Optional[str] = None,
+        duration_ms: Optional[int] = None,
     ) -> CareRoom:
         room = self.rooms.get(patient_id)
         if not room:
@@ -97,6 +103,9 @@ class CareStore:
             timestamp=datetime.utcnow().isoformat(),
             to_id=to_id,
             to_label=to_label,
+            kind="voice" if audio_id else "text",
+            audio_id=audio_id,
+            duration_ms=duration_ms,
         )
         room.messages.append(msg)
         room.updated_at = datetime.utcnow().isoformat()
@@ -162,6 +171,27 @@ class CareStore:
     def get_presence(self, patient_id: str) -> list[dict]:
         return list(self.presence.get(patient_id, {}).values())
 
+    def touch_user(self, user_id: str) -> None:
+        self.last_seen[user_id] = datetime.utcnow().isoformat()
+        self.offline.discard(user_id)
+
+    def mark_user_offline(self, user_id: str) -> None:
+        self.offline.add(user_id)
+
+    def save_voice_audio(self, audio_id: str, audio: bytes, mime: str = "audio/wav") -> None:
+        self.voice_audio[audio_id] = audio
+        self.voice_mime[audio_id] = mime
+        while len(self.voice_audio) > 40:
+            old = next(iter(self.voice_audio))
+            self.voice_audio.pop(old)
+            self.voice_mime.pop(old, None)
+
+    def get_voice_audio(self, audio_id: str) -> Optional[tuple[bytes, str]]:
+        audio = self.voice_audio.get(audio_id)
+        if audio is None:
+            return None
+        return audio, self.voice_mime.get(audio_id, "audio/wav")
+
     def save_office_call(self, call: OfficeCall) -> OfficeCall:
         self.office_calls.setdefault(call.patient_id, []).insert(0, call)
         return call
@@ -177,17 +207,17 @@ class CareStore:
         return None
 
     def add_notification(self, note: DoctorNotification) -> DoctorNotification:
-        self.notifications.setdefault(note.doctor_id, []).insert(0, note)
+        self.notifications.setdefault(note.recipient_id or note.doctor_id, []).insert(0, note)
         return note
 
-    def list_notifications(self, doctor_id: str, unread_only: bool = False) -> list[DoctorNotification]:
-        notes = self.notifications.get(doctor_id, [])
+    def list_notifications(self, user_id: str, unread_only: bool = False) -> list[DoctorNotification]:
+        notes = self.notifications.get(user_id, [])
         if unread_only:
             return [n for n in notes if not n.read]
         return list(notes)
 
-    def mark_notification_read(self, doctor_id: str, note_id: str) -> Optional[DoctorNotification]:
-        for n in self.notifications.get(doctor_id, []):
+    def mark_notification_read(self, user_id: str, note_id: str) -> Optional[DoctorNotification]:
+        for n in self.notifications.get(user_id, []):
             if n.id == note_id:
                 n.read = True
                 return n

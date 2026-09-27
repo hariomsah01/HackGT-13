@@ -10,18 +10,24 @@ from fastapi import (
     Header,
     HTTPException,
     Request,
+    Response,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
 )
 
+from fastapi.concurrency import run_in_threadpool
+
 from app.engines.auth import assert_chart_access, authenticate, list_users_public, verify_token
 from app.models.schemas import (
     AskRequest,
+    AssistantSendRequest,
+    AssistantSubmitRequest,
     LoginRequest,
     MessageRequest,
     NoteRequest,
     OfficeCallRequest,
+    PresencePing,
     RxAddRequest,
     RxProposeRequest,
     RxStopRequest,
@@ -53,6 +59,8 @@ def health(request: Request):
         "muse": e.muse.enabled,
         "gemini": e.ask.enabled,
         "openai_rx": e.rx.enabled,
+        "elevenlabs": e.voice.enabled,
+        "assistant": e.assistant.engine,
     }
 
 
@@ -133,6 +141,189 @@ def post_message(
         raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/presence/ping")
+def presence_ping(
+    body: PresencePing,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Mark the caller online and return live status for the people they watch."""
+    user = user_from(authorization)
+    return eng(request).presence_ping(user, body.watch)
+
+
+@router.post("/presence/leave")
+def presence_leave(request: Request, authorization: Optional[str] = Header(default=None)):
+    user = user_from(authorization)
+    eng(request).presence_leave(user)
+    return {"ok": True}
+
+
+@router.post("/patients/{patient_id}/voice-message")
+async def send_voice_message(
+    patient_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    audio: UploadFile = File(...),
+    duration_ms: Optional[int] = Form(default=None),
+):
+    """Doctor records a voice message for the patient (Muse Voice transcript)."""
+    user = user_from(authorization)
+    e = eng(request)
+    wav = await audio.read()
+    try:
+        result = e.send_voice_message(patient_id, user, wav, duration_ms)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    await hub.broadcast(
+        patient_id,
+        {
+            "type": "room_update",
+            "room": result["room"],
+            "briefing": e.store.get_briefing(patient_id) or {},
+            "private": True,
+            "actor": user.label,
+        },
+    )
+    return result
+
+
+@router.get("/patients/{patient_id}/voice-message/{audio_id}")
+def get_voice_message(
+    patient_id: str,
+    audio_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = user_from(authorization)
+    try:
+        audio, mime = eng(request).voice_audio(patient_id, user, audio_id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return Response(content=audio, media_type=mime)
+
+
+@router.get("/fda/drug")
+def fda_drug(
+    request: Request,
+    name: str,
+    patient_id: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+):
+    """openFDA medicine profile: label summary, products (NDC) and FAERS reports."""
+    user = user_from(authorization)
+    try:
+        return eng(request).fda_drug(user, name, patient_id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/patients/{patient_id}/assistant/turn")
+async def assistant_turn(
+    patient_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    mode: str = Form(default="patient"),
+    history: str = Form(default="[]"),
+    text: str = Form(default=""),
+    hint: str = Form(default=""),
+    recipient: str = Form(default="team"),
+    draft: str = Form(default=""),
+    audio: Optional[UploadFile] = File(default=None),
+):
+    """One spoken or typed turn with Ava (Muse Voice in, ElevenLabs out)."""
+    user = user_from(authorization)
+    try:
+        turns = json.loads(history or "[]")
+        if not isinstance(turns, list):
+            turns = []
+    except json.JSONDecodeError:
+        turns = []
+    wav = await audio.read() if audio is not None else None
+    try:
+        return await run_in_threadpool(
+            eng(request).assistant_turn,
+            patient_id,
+            user,
+            "doctor" if mode == "doctor" else "patient",
+            turns,
+            text=text,
+            wav_bytes=wav,
+            hint=hint,
+            recipient=recipient,
+            draft=draft,
+        )
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/patients/{patient_id}/assistant/submit")
+async def assistant_submit(
+    patient_id: str,
+    body: AssistantSubmitRequest,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Patient sends their Ava conversation to the care team or one doctor."""
+    user = user_from(authorization)
+    e = eng(request)
+    try:
+        result = e.assistant_submit(
+            patient_id, user, [t.model_dump() for t in body.turns], body.recipient
+        )
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    await hub.broadcast(
+        patient_id,
+        {
+            "type": "room_update",
+            "room": result["room"],
+            "briefing": e.store.get_briefing(patient_id) or {},
+            "actor": user.label,
+        },
+    )
+    return result
+
+
+@router.post("/patients/{patient_id}/assistant/send")
+async def assistant_send(
+    patient_id: str,
+    body: AssistantSendRequest,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Doctor sends the message drafted with Ava to the patient."""
+    user = user_from(authorization)
+    e = eng(request)
+    try:
+        result = e.assistant_send_to_patient(patient_id, user, body.message, body.include_voice)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    await hub.broadcast(
+        patient_id,
+        {
+            "type": "room_update",
+            "room": result["room"],
+            "briefing": e.store.get_briefing(patient_id) or {},
+            "private": True,
+            "actor": user.label,
+        },
+    )
+    return result
 
 
 @router.post("/patients/{patient_id}/notes")

@@ -1,13 +1,17 @@
 """ClearPath care-space orchestration + Muse agent."""
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 from uuid import uuid4
 
-from app.engines.auth import SessionUser, assert_chart_access
+from app.engines import fda
+from app.engines.assistant import CareAssistant
+from app.engines.auth import USERS, SessionUser, assert_chart_access
 from app.engines.care_agent import CareAgent
 from app.engines.care_signals import care_attention, handoff_pack
 from app.engines.connection_intel import connection_report
+from app.engines.elevenlabs import ElevenLabsClient
 from app.engines.gemini_copilot import ScreenAsk
 from app.engines.graph import build_care_graph
 from app.engines.muse import MuseClient
@@ -24,6 +28,8 @@ class CareEngine:
         self.agent = CareAgent(store, self.muse)
         self.ask = ScreenAsk()
         self.rx = RxAnalyzer()
+        self.assistant = CareAssistant(self.muse)
+        self.voice = ElevenLabsClient()
         if not store.list_patients():
             for i in range(1, 4):
                 self.create_patient(seed=10 + i)
@@ -71,6 +77,7 @@ class CareEngine:
         room = self.store.get_room(patient_id)
         briefing = self.store.get_briefing(patient_id)
         handoff = handoff_pack(patient, self.store, briefing)
+        fda.warm([rx.name for rx in patient.prescriptions if rx.status == "active"])
         return {
             "patient": patient.model_dump(),
             "room": room.model_dump() if room else None,
@@ -88,6 +95,11 @@ class CareEngine:
                 c.model_dump() for c in self.store.list_office_calls(patient_id)
             ],
             "muse": {"enabled": self.muse.enabled},
+            "assistant": {
+                "name": "Ava",
+                "tts": "elevenlabs" if self.voice.enabled else "browser",
+                "brain": self.assistant.engine,
+            },
             "openai_rx": {"enabled": self.rx.enabled},
         }
 
@@ -382,6 +394,332 @@ class CareEngine:
             "private": is_private,
         }
 
+    # Browsers throttle timers in background tabs to about once a minute.
+    ONLINE_WINDOW_S = 75
+
+    def presence_ping(self, user: SessionUser, watch: list[str]) -> dict:
+        """Heartbeat for the caller; returns live status for the ids they are watching."""
+        self.store.touch_user(user.id)
+        allowed: set[str] | None = None
+        if user.kind == "patient":
+            patient = self.store.get_patient(user.chart_id or "")
+            allowed = {m.id for m in patient.team} if patient else set()
+
+        now = datetime.utcnow()
+        statuses: dict[str, dict] = {}
+        for key in watch[:20]:
+            row = next(
+                (u for u in USERS if u["id"] == key or (u.get("chart_id") and u["chart_id"] == key)),
+                None,
+            )
+            if not row or (allowed is not None and row["id"] not in allowed):
+                continue
+            seen = self.store.last_seen.get(row["id"])
+            online = False
+            if seen and row["id"] not in self.store.offline:
+                online = (now - datetime.fromisoformat(seen)).total_seconds() <= self.ONLINE_WINDOW_S
+            statuses[key] = {
+                "user_id": row["id"],
+                "label": row["label"],
+                "online": online,
+                "last_seen": seen,
+            }
+        return {"statuses": statuses, "server_time": now.isoformat()}
+
+    def presence_leave(self, user: SessionUser) -> None:
+        self.store.mark_user_offline(user.id)
+
+    def send_voice_message(
+        self, patient_id: str, user: SessionUser, wav_bytes: bytes, duration_ms: int | None = None
+    ) -> dict:
+        """Doctor records a voice message for the patient; Muse Voice transcribes it."""
+        assert_chart_access(user, patient_id)
+        if user.kind != "doctor":
+            raise PermissionError("Only doctors can send voice messages to the patient")
+        patient = self.store.get_patient(patient_id)
+        if not patient:
+            raise ValueError("Patient not found")
+        if not any(m.id == user.id for m in patient.team):
+            raise PermissionError("You are not on this patient's care team")
+        if not wav_bytes:
+            raise ValueError("The recording was empty")
+
+        transcript = ""
+        meta: dict = {"source": "none"}
+        if self.muse.enabled:
+            tr = self.muse.transcribe_wav(wav_bytes)
+            transcript = (tr.get("transcript") or "").strip()
+            meta = {
+                "source": tr.get("source"),
+                "audioDurationMs": tr.get("audioDurationMs"),
+                "error": tr.get("error"),
+            }
+            duration_ms = duration_ms or tr.get("audioDurationMs")
+
+        audio_id = f"vm_{uuid4().hex[:10]}"
+        self.store.save_voice_audio(audio_id, wav_bytes)
+        room = self.store.post_message(
+            patient_id,
+            user.id,
+            user.label,
+            transcript or "Voice message",
+            to_id=patient.id,
+            to_label=patient.label,
+            audio_id=audio_id,
+            duration_ms=duration_ms,
+        )
+        return {
+            "room": room.model_dump(),
+            "message": room.messages[-1].model_dump(),
+            "transcription": meta,
+            "private": True,
+        }
+
+    def voice_audio(self, patient_id: str, user: SessionUser, audio_id: str) -> tuple[bytes, str]:
+        assert_chart_access(user, patient_id)
+        room = self.store.get_room(patient_id)
+        msg = next((m for m in (room.messages if room else []) if m.audio_id == audio_id), None)
+        if not msg:
+            raise ValueError("Voice message not found")
+        if user.kind == "doctor" and user.id != msg.author_id:
+            raise PermissionError("This voice message is private to its sender and the patient")
+        audio = self.store.get_voice_audio(audio_id)
+        if audio is None:
+            raise ValueError("This recording is no longer available")
+        return audio
+
+    # ── Ava voice assistant ─────────────────────────────────────
+
+    def _assistant_access(self, patient_id: str, user: SessionUser, mode: str) -> Patient:
+        assert_chart_access(user, patient_id)
+        patient = self.store.get_patient(patient_id)
+        if not patient:
+            raise ValueError("Patient not found")
+        if mode == "doctor":
+            if user.kind != "doctor" or not any(m.id == user.id for m in patient.team):
+                raise PermissionError("Only doctors on this care team can use Ava for this patient")
+        elif user.kind != "patient":
+            raise PermissionError("Only the patient can start this conversation")
+        return patient
+
+    def _recipient(self, patient: Patient, recipient: str) -> tuple[list[str], str]:
+        if not recipient or recipient == "team":
+            return [m.id for m in patient.team], "your full care team"
+        member = next((m for m in patient.team if m.id == recipient), None)
+        if not member:
+            raise ValueError("Choose a doctor from this care team")
+        return [member.id], member.label
+
+    def assistant_turn(
+        self,
+        patient_id: str,
+        user: SessionUser,
+        mode: str,
+        history: list[dict],
+        text: str = "",
+        wav_bytes: bytes | None = None,
+        hint: str = "",
+        recipient: str = "team",
+        draft: str = "",
+    ) -> dict:
+        """One back-and-forth with Ava: Muse Voice hears, the assistant replies, ElevenLabs speaks."""
+        patient = self._assistant_access(patient_id, user, mode)
+        if mode == "doctor":
+            recipient_label = patient.label
+        else:
+            _, recipient_label = self._recipient(patient, recipient)
+
+        user_text, source, transcription_error = text.strip(), "typed", None
+        if not user_text and wav_bytes:
+            if self.muse.enabled:
+                tr = self.muse.transcribe_wav(wav_bytes)
+                user_text = (tr.get("transcript") or "").strip()
+                source = "muse_voice"
+                transcription_error = tr.get("error")
+            if not user_text and hint.strip():
+                user_text, source = hint.strip(), "browser_captions"
+
+        active_meds = [(rx.name, rx.reason) for rx in patient.prescriptions if rx.status == "active"]
+        fda_refs: list[dict] = []
+        if not history and not user_text:
+            result = self.assistant.greeting(mode, patient, user.label, recipient_label)
+            source = "start"
+            fda.warm([name for name, _ in active_meds])
+        elif not user_text:
+            raise ValueError(
+                "Ava didn't catch that. Try speaking a little closer to the mic, or type instead."
+            )
+        else:
+            reference, fda_refs = self._fda_reference(user_text, history, active_meds)
+            result = self.assistant.turn(
+                mode, patient, history, user_text, user.label, recipient_label, draft,
+                fda_reference=reference,
+            )
+
+        audio = self.voice.speak(result["reply"])
+        return {
+            **result,
+            "fda_refs": fda_refs,
+            "user_text": user_text,
+            "user_source": source,
+            "transcription_error": transcription_error,
+            "audio_b64": base64.b64encode(audio).decode() if audio else None,
+            "audio_mime": "audio/mpeg" if audio else None,
+            "tts": "elevenlabs" if audio else "browser",
+            "engine": self.assistant.engine,
+        }
+
+    @staticmethod
+    def _fda_reference(
+        user_text: str, history: list[dict], medicines: list[tuple[str, str]]
+    ) -> tuple[str, list[dict]]:
+        """FDA label facts for the medicines this turn (or the one just before it) is about."""
+        names = fda.mentioned_medicines([user_text], medicines)
+        if not names:
+            recent = [str(t.get("text") or "") for t in history[-2:] if t.get("role") == "user"]
+            if recent and any(w in user_text.lower() for w in (" it", "that", "this", "them", "those")):
+                names = fda.mentioned_medicines(recent, medicines)
+        parts: list[str] = []
+        refs: list[dict] = []
+        for name in names:
+            profile = fda.drug_profile(name)
+            text = fda.ava_reference(profile)
+            if not text:
+                continue
+            parts.append(text)
+            refs.append(
+                {
+                    "name": name,
+                    "generic_name": profile.get("generic_name") or name,
+                    "label_url": profile.get("sources", {}).get("label") or "",
+                }
+            )
+        return " || ".join(parts), refs
+
+    def fda_drug(self, user: SessionUser, name: str, patient_id: str | None = None) -> dict:
+        """openFDA profile for the medicine info card."""
+        if not name.strip():
+            raise ValueError("Medicine name is required")
+        if patient_id:
+            assert_chart_access(user, patient_id)
+        return fda.drug_profile(name.strip())
+
+    def assistant_submit(
+        self, patient_id: str, user: SessionUser, turns: list[dict], recipient: str
+    ) -> dict:
+        """Patient finished talking with Ava: summarize and notify the chosen doctor(s)."""
+        patient = self._assistant_access(patient_id, user, "patient")
+        doctor_ids, recipient_label = self._recipient(patient, recipient)
+        if not any(t.get("role") == "user" and str(t.get("text") or "").strip() for t in turns):
+            raise ValueError("Say something to Ava before sending")
+
+        transcript = "\n".join(
+            f"{'Ava' if t.get('role') == 'assistant' else patient.label}: {str(t.get('text') or '').strip()}"
+            for t in turns
+            if str(t.get("text") or "").strip()
+        )
+        summary = self.assistant.summarize(patient, transcript, recipient_label)
+        primary = next(m for m in patient.team if m.id == doctor_ids[0])
+        call = OfficeCall(
+            id=f"call_{uuid4().hex[:8]}",
+            patient_id=patient.id,
+            patient_label=patient.label,
+            doctor_id=primary.id,
+            doctor_label=primary.label if len(doctor_ids) == 1 else "Care team",
+            reason=summary["topic"],
+            transcript=transcript,
+            insight=summary["insight"],
+            topic=summary["topic"],
+            needs_callback=summary["needs_callback"],
+            assistant_label="Ava · ClearPath assistant",
+            source="ava_voice",
+            recipient_ids=doctor_ids,
+            recipient_label=recipient_label,
+            urgency=summary["urgency"],
+        )
+        self.store.save_office_call(call)
+        prefix = "Urgent: " if summary["urgency"] == "urgent" else ""
+        for did in doctor_ids:
+            self.store.add_notification(
+                DoctorNotification(
+                    id=f"note_{uuid4().hex[:8]}",
+                    doctor_id=did,
+                    recipient_id=did,
+                    kind="assistant_conversation",
+                    title=f"{prefix}{patient.label} talked with Ava",
+                    detail=summary["insight"],
+                    patient_id=patient.id,
+                    patient_label=patient.label,
+                    call_id=call.id,
+                )
+            )
+        self.store.log(
+            user.id,
+            user.label,
+            patient.id,
+            "office_call",
+            f"{patient.label} talked with Ava · sent to {recipient_label}: {summary['topic']}",
+        )
+        room = self.store.post_message(
+            patient.id,
+            "assistant_ava",
+            "Ava · care assistant",
+            f"{patient.label} talked with me: {summary['insight']}",
+            to_id=doctor_ids[0] if len(doctor_ids) == 1 else None,
+            to_label=recipient_label if len(doctor_ids) == 1 else None,
+        )
+        return {
+            "call": call.model_dump(),
+            "summary": summary,
+            "recipient_label": recipient_label,
+            "room": room.model_dump(),
+            "office_calls": [c.model_dump() for c in self.store.list_office_calls(patient.id)],
+        }
+
+    def assistant_send_to_patient(
+        self, patient_id: str, user: SessionUser, message: str, include_voice: bool = True
+    ) -> dict:
+        """Doctor sends the message drafted with Ava to the patient's private chat."""
+        patient = self._assistant_access(patient_id, user, "doctor")
+        message = message.strip()
+        if not message:
+            raise ValueError("The message is empty")
+
+        audio_id = None
+        if include_voice:
+            audio = self.voice.speak(message)
+            if audio:
+                audio_id = f"vm_{uuid4().hex[:10]}"
+                self.store.save_voice_audio(audio_id, audio, "audio/mpeg")
+        room = self.store.post_message(
+            patient.id,
+            user.id,
+            user.label,
+            message,
+            to_id=patient.id,
+            to_label=patient.label,
+            audio_id=audio_id,
+        )
+        patient_user = next((u for u in USERS if u.get("chart_id") == patient.id), None)
+        if patient_user:
+            self.store.add_notification(
+                DoctorNotification(
+                    id=f"note_{uuid4().hex[:8]}",
+                    doctor_id=user.id,
+                    recipient_id=patient_user["id"],
+                    kind="doctor_update",
+                    title=f"{user.label} sent you a message",
+                    detail=message[:160],
+                    patient_id=patient.id,
+                    patient_label=patient.label,
+                )
+            )
+        return {
+            "room": room.model_dump(),
+            "message": room.messages[-1].model_dump(),
+            "voiced": bool(audio_id),
+        }
+
     def brief(self, patient_id: str) -> dict:
         return self.agent.brief_room(patient_id)
 
@@ -592,8 +930,6 @@ class CareEngine:
         }
 
     def list_doctor_notifications(self, user: SessionUser) -> dict:
-        if user.kind != "doctor":
-            raise ValueError("Only doctors have office-call notifications")
         notes = self.store.list_notifications(user.id)
         return {
             "notifications": [n.model_dump() for n in notes],
@@ -601,21 +937,21 @@ class CareEngine:
         }
 
     def mark_notification_read(self, user: SessionUser, note_id: str) -> dict:
-        if user.kind != "doctor":
-            raise ValueError("Only doctors can update notifications")
         note = self.store.mark_notification_read(user.id, note_id)
         if not note:
             raise ValueError("Notification not found")
-        if note.call_id:
-            self.store.mark_office_call_status(note.call_id, "read")
+        if note.call_id and user.kind == "doctor":
+            call = self.store.get_office_call(note.call_id)
+            if call and call.status == "new":
+                self.store.mark_office_call_status(note.call_id, "read")
         return {"notification": note.model_dump()}
 
     def mark_office_call_responded(self, user: SessionUser, call_id: str) -> dict:
         call = self.store.get_office_call(call_id)
         if not call:
             raise ValueError("Office call not found")
-        if user.kind == "doctor" and call.doctor_id != user.id:
-            raise ValueError("This call was for another doctor's office")
+        if user.kind == "doctor" and user.id not in (call.recipient_ids or [call.doctor_id]):
+            raise ValueError("This conversation was sent to another doctor")
         assert_chart_access(user, call.patient_id)
         updated = self.store.mark_office_call_status(call_id, "responded")
         return {"call": updated.model_dump() if updated else None}
