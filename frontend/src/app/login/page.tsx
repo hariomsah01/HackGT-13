@@ -7,8 +7,11 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { PublicUser } from "@/lib/types";
 
+type Kind = "patient" | "doctor";
+
 export default function LoginPage() {
   const [users, setUsers] = useState<PublicUser[]>([]);
+  const [kind, setKind] = useState<Kind>("patient");
   const [selected, setSelected] = useState("");
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
@@ -17,15 +20,27 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
+    const as = new URLSearchParams(window.location.search).get("as");
+    const start: Kind = as === "doctor" ? "doctor" : "patient";
+    setKind(start);
     api.users().then((list) => {
-      const ordered = [...list].sort((a, b) => {
-        if (a.kind === b.kind) return 0;
-        return a.kind === "patient" ? -1 : 1;
-      });
-      setUsers(ordered);
-      if (ordered[0]) setSelected(ordered[0].id);
+      setUsers(list);
+      const first = list.find((u) => (u.kind === "patient") === (start === "patient"));
+      if (first) setSelected(first.id);
     });
   }, []);
+
+  const shown = users.filter((u) => (u.kind === "patient") === (kind === "patient"));
+
+  function switchKind(next: Kind) {
+    if (next === kind) return;
+    setKind(next);
+    setPin("");
+    setError(null);
+    const first = users.find((u) => (u.kind === "patient") === (next === "patient"));
+    setSelected(first?.id || "");
+    window.history.replaceState(null, "", `/login?as=${next}`);
+  }
 
   useEffect(() => {
     if (!user) return;
@@ -82,9 +97,27 @@ export default function LoginPage() {
             onSubmit={onSubmit}
             className="animate-[fadeRise_0.75s_ease-out] rounded-[2rem] border border-[var(--line)] bg-white/95 p-[clamp(1.5rem,2vw,2.25rem)] shadow-[0_30px_70px_rgba(15,23,42,0.08)]"
           >
-            <p className="text-sm font-semibold text-[var(--ink)]">Who are you?</p>
-            <ul className="mt-4 space-y-2">
-              {users.map((u) => {
+            <div className="grid grid-cols-2 gap-1 rounded-2xl bg-[var(--paper)] p-1">
+              {(["patient", "doctor"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => switchKind(k)}
+                  className={`rounded-xl py-2.5 text-sm font-bold transition ${
+                    kind === k
+                      ? "bg-white text-[var(--ink)] shadow-[0_4px_12px_rgba(15,23,42,0.08)]"
+                      : "text-[var(--muted)] hover:text-[var(--ink)]"
+                  }`}
+                >
+                  {k === "patient" ? "I'm a patient" : "I'm a doctor"}
+                </button>
+              ))}
+            </div>
+            <p className="mt-6 text-sm font-semibold text-[var(--ink)]">
+              {kind === "patient" ? "Choose your account" : "Choose your profile"}
+            </p>
+            <ul className="mt-3 space-y-2">
+              {shown.map((u) => {
                 const on = selected === u.id;
                 const mark =
                   u.kind === "patient"
