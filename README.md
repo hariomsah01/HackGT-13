@@ -91,7 +91,7 @@ Guardrails: Ava never tells a patient to start, stop or change a dose. She cites
 - **FDA medicine card:** click any medicine for its openFDA profile.
 - **Ava for doctors:** draft a plain-language message for the patient, then send it with an optional voice note.
 - **Voice messages:** record a message for the patient; Muse transcribes it.
-- **Insights:** totals, open handoffs, per-patient bond scores and a filterable team activity feed (medicines, or notes and messages).
+- **Insights:** totals, open handoffs, per-patient bond scores and a team activity feed with two views: **Notes & messages** and **Medicines**.
 - **Notifications** for new Ava conversations, which disappear once read.
 
 ### For patients
@@ -113,7 +113,7 @@ Guardrails: Ava never tells a patient to start, stop or change a dose. She cites
 | Doctor C | Cardiology | `3333` |
 | Doctor D | Nephrology | `4444` |
 
-On the sign-in page, choose **I'm a patient** or **I'm a doctor**, then pick an account.
+On the sign-in page, choose **I'm a patient** (Patients 1–3) or **I'm a doctor** (Doctors A–D), then pick an account and enter its PIN. The landing page's "Sign in as a doctor" and "I am a patient" buttons open the matching list directly.
 
 ---
 
