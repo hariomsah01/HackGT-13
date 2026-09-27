@@ -119,6 +119,93 @@ export const api = {
       office_calls: import("./types").OfficeCall[];
     }>(`/api/patients/${id}/office-call`, { method: "POST", token, body: fd });
   },
+  presencePing: (watch: string[], token: string) =>
+    req<{ statuses: Record<string, import("./types").LiveStatus>; server_time: string }>(
+      "/api/presence/ping",
+      { method: "POST", token, body: JSON.stringify({ watch }) }
+    ),
+  presenceLeave: (token: string) =>
+    fetch(`${API}/api/presence/leave`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      keepalive: true,
+    }).catch(() => undefined),
+  sendVoiceMessage: (id: string, audio: Blob, durationMs: number, token: string) => {
+    const fd = new FormData();
+    fd.append("audio", audio, "voice-message.wav");
+    fd.append("duration_ms", String(durationMs));
+    return req<{
+      room: import("./types").CareRoom;
+      message: import("./types").RoomMessage;
+      transcription: { source?: string; error?: string | null };
+    }>(`/api/patients/${id}/voice-message`, { method: "POST", token, body: fd });
+  },
+  fdaDrug: (name: string, token: string, patientId?: string) =>
+    req<import("./types").FdaProfile>(
+      `/api/fda/drug?${new URLSearchParams({ name, ...(patientId ? { patient_id: patientId } : {}) })}`,
+      { token }
+    ),
+  voiceAudio: async (id: string, audioId: string, token: string) => {
+    const res = await fetch(`${API}/api/patients/${id}/voice-message/${audioId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error("This recording is no longer available");
+    return res.blob();
+  },
+  assistantTurn: (
+    id: string,
+    body: {
+      mode: "patient" | "doctor";
+      history: { role: "assistant" | "user"; text: string }[];
+      text?: string;
+      hint?: string;
+      recipient?: string;
+      draft?: string;
+      audio?: Blob;
+    },
+    token: string
+  ) => {
+    const fd = new FormData();
+    fd.append("mode", body.mode);
+    fd.append("history", JSON.stringify(body.history));
+    fd.append("text", body.text || "");
+    fd.append("hint", body.hint || "");
+    fd.append("recipient", body.recipient || "team");
+    fd.append("draft", body.draft || "");
+    if (body.audio) fd.append("audio", body.audio, "turn.wav");
+    return req<import("./types").AssistantTurnResult>(`/api/patients/${id}/assistant/turn`, {
+      method: "POST",
+      token,
+      body: fd,
+    });
+  },
+  assistantSubmit: (
+    id: string,
+    turns: { role: "assistant" | "user"; text: string }[],
+    recipient: string,
+    token: string
+  ) =>
+    req<{
+      call: import("./types").OfficeCall;
+      summary: { topic: string; insight: string; urgency: string; needs_callback: boolean };
+      recipient_label: string;
+      room: import("./types").CareRoom;
+      office_calls: import("./types").OfficeCall[];
+    }>(`/api/patients/${id}/assistant/submit`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({ turns, recipient }),
+    }),
+  assistantSend: (id: string, message: string, includeVoice: boolean, token: string) =>
+    req<{
+      room: import("./types").CareRoom;
+      message: import("./types").RoomMessage;
+      voiced: boolean;
+    }>(`/api/patients/${id}/assistant/send`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({ message, include_voice: includeVoice }),
+    }),
   notifications: (token: string) =>
     req<{
       notifications: import("./types").DoctorNotification[];

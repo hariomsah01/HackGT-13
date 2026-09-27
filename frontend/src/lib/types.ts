@@ -107,6 +107,16 @@ export interface RoomMessage {
   timestamp: string;
   to_id?: string | null;
   to_label?: string | null;
+  kind?: "text" | "voice";
+  audio_id?: string | null;
+  duration_ms?: number | null;
+}
+
+export interface LiveStatus {
+  user_id: string;
+  label: string;
+  online: boolean;
+  last_seen?: string | null;
 }
 
 export interface CareRoom {
@@ -270,13 +280,74 @@ export interface OfficeCall {
   status: "new" | "read" | "responded";
   assistant_label: string;
   source: string;
+  recipient_ids?: string[];
+  recipient_label?: string;
+  urgency?: "routine" | "soon" | "urgent" | string;
   created_at: string;
   read_at?: string | null;
+}
+
+export interface AssistantTurnResult {
+  reply: string;
+  ready: boolean;
+  urgent: boolean;
+  draft: string;
+  user_text: string;
+  user_source: "typed" | "muse_voice" | "browser_captions" | "start";
+  transcription_error?: string | null;
+  audio_b64?: string | null;
+  audio_mime?: string | null;
+  tts: "elevenlabs" | "browser";
+  engine: string;
+  fda_refs?: FdaRef[];
+}
+
+export interface FdaRef {
+  name: string;
+  generic_name: string;
+  label_url: string;
+}
+
+export interface FdaProduct {
+  brand: string;
+  labeler: string;
+  form: string;
+  strength: string;
+  category: string;
+}
+
+export interface FdaProfile {
+  query: string;
+  found: boolean;
+  generic_name: string;
+  brand_names?: string[];
+  manufacturer?: string;
+  route?: string;
+  drug_class?: string;
+  indications?: string;
+  dosage?: string;
+  boxed_warning?: string;
+  warnings?: string;
+  side_effects?: string;
+  patient_info?: string;
+  interactions?: string;
+  effective_date?: string;
+  label_url?: string;
+  products: FdaProduct[];
+  manufacturers: string[];
+  faers: {
+    total_reports: number;
+    serious_reports: number;
+    top_reactions: { term: string; count: number }[];
+  };
+  sources: { label: string; openfda: string };
+  fetched_at: string;
 }
 
 export interface DoctorNotification {
   id: string;
   doctor_id: string;
+  recipient_id?: string;
   kind: string;
   title: string;
   detail: string;
@@ -303,6 +374,7 @@ export interface PatientBundle {
   office_calls?: OfficeCall[];
   muse?: { enabled: boolean };
   openai_rx?: { enabled: boolean };
+  assistant?: { name: string; tts: "elevenlabs" | "browser"; brain: string };
 }
 
 export interface Analytics {
