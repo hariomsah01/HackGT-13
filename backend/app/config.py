@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.8-flash"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = "Xb7hH8MSUJpSbSDYk0k2"  # "Alice", British female
+    elevenlabs_model: str = "eleven_flash_v2_5"
     cors_origins: str = "http://localhost:3000"
 
     @property
