@@ -373,15 +373,9 @@ export default function HomePage() {
       {/* Features */}
       <section className="relative z-[1]">
         <div className="site-wrap py-20 lg:py-28">
-          <div className="flex flex-wrap items-end justify-between gap-6">
-            <div>
-              <p className="section-kicker">What it does</p>
-              <h2 className="section-title max-w-[18ch]">Less waiting, for everyone.</h2>
-            </div>
-            <p className="max-w-[38ch] text-[clamp(1rem,1.1vw,1.35rem)] leading-relaxed text-[var(--muted)]">
-              All of this works in the demo. Sign in as Doctor A or Patient 1 and
-              click around.
-            </p>
+          <div>
+            <p className="section-kicker">What it does</p>
+            <h2 className="section-title max-w-[18ch]">Less waiting, for everyone.</h2>
           </div>
 
           <div className="mt-12 grid gap-5 lg:mt-16 lg:grid-cols-3 lg:gap-6">
@@ -501,13 +495,13 @@ export default function HomePage() {
             </h2>
             <div className="relative flex flex-wrap gap-3">
               <Link
-                href="/login"
+                href="/login?as=doctor"
                 className="rounded-2xl bg-white px-8 py-4 text-lg font-bold text-[var(--brand-deep)] transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_rgba(0,0,0,0.2)]"
               >
                 Sign in as a doctor
               </Link>
               <Link
-                href="/login"
+                href="/login?as=patient"
                 className="rounded-2xl border border-white/40 px-8 py-4 text-lg font-semibold text-white transition duration-300 hover:-translate-y-0.5 hover:bg-white/10"
               >
                 I am a patient
