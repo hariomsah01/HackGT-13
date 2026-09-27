@@ -7,7 +7,11 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useAskScreen } from "@/lib/askScreen";
 import { CareGraph } from "@/components/CareGraph";
-import { startVisitRecording, type VisitRecorder } from "@/lib/wavRecorder";
+import { useLiveStatus } from "@/lib/presence";
+import { AssistantConversation } from "@/components/AssistantConversation";
+import { LiveStatusBadge } from "@/components/LiveStatusBadge";
+import { MedicineFdaCard } from "@/components/MedicineFdaCard";
+import { VoiceMessage } from "@/components/VoiceMessage";
 import type {
   Briefing,
   OfficeCall,
@@ -40,18 +44,15 @@ export default function PatientRoomPage() {
   const searchParams = useSearchParams();
   const [data, setData] = useState<PatientBundle | null>(null);
   const [tab, setTab] = useState<Tab>("Overview");
+  const [fdaMed, setFdaMed] = useState<{ name: string; dose: string } | null>(null);
+  const [avaSeed, setAvaSeed] = useState<{ text: string; nonce: number } | null>(null);
   const [msg, setMsg] = useState("");
   const [talkChannel, setTalkChannel] = useState<"team" | "private">("team");
   const [note, setNote] = useState("");
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [presence, setPresence] = useState<PresenceUser[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [visitOut, setVisitOut] = useState<string | null>(null);
-  const [visitSource, setVisitSource] = useState<string | null>(null);
   const [officeCalls, setOfficeCalls] = useState<OfficeCall[]>([]);
-  const [recording, setRecording] = useState(false);
-  const [recSeconds, setRecSeconds] = useState(0);
-  const recorderRef = useRef<VisitRecorder | null>(null);
   const [busy, setBusy] = useState(false);
   const [rxName, setRxName] = useState("");
   const [rxDose, setRxDose] = useState("");
@@ -60,7 +61,9 @@ export default function PatientRoomPage() {
   const [rxAnalysis, setRxAnalysis] = useState<RxAnalysis | null>(null);
   const [rxBusy, setRxBusy] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-
+  const liveStatus = useLiveStatus(
+    id ? [id, ...(data?.patient.team.map((m) => m.id) ?? [])] : []
+  );
   useEffect(() => {
     if (ready && !user) router.replace("/login");
   }, [ready, user, router]);
@@ -71,6 +74,10 @@ export default function PatientRoomPage() {
       setTab(t as Tab);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (tab !== "Calls") setAvaSeed(null);
+  }, [tab]);
 
   const applyBundle = useCallback((b: PatientBundle) => {
     setData(b);
@@ -184,56 +191,6 @@ export default function PatientRoomPage() {
     try {
       const b = await api.brief(id, token);
       setBriefing(b);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!recording) return;
-    const t = setInterval(() => setRecSeconds((s) => s + 1), 1000);
-    return () => clearInterval(t);
-  }, [recording]);
-
-  useEffect(() => () => recorderRef.current?.cancel(), []);
-
-  async function startRecording() {
-    setError(null);
-    try {
-      recorderRef.current = await startVisitRecording();
-      setRecSeconds(0);
-      setRecording(true);
-    } catch {
-      setError("Microphone access was blocked — allow it in the browser address bar and try again.");
-    }
-  }
-
-  async function stopRecording() {
-    const rec = recorderRef.current;
-    recorderRef.current = null;
-    setRecording(false);
-    if (!rec) return;
-    const wav = await rec.stop();
-    await runVisitDemo(wav);
-  }
-
-  async function runVisitDemo(audio?: Blob) {
-    if (!token || !user) return;
-    setBusy(true);
-    setVisitOut(null);
-    try {
-      const doctorId = user.kind === "doctor" ? user.id : "doctor_a";
-      const reason = "Symptoms and checkup request while doctor unavailable";
-      const res = audio
-        ? await api.officeCallAudio(id, { doctor_id: doctorId, reason }, audio, token)
-        : await api.officeCall(id, { doctor_id: doctorId, reason, demo: true }, token);
-      setVisitOut(res.transcript);
-      setVisitSource(String(res.call?.source || "demo"));
-      setOfficeCalls(res.office_calls || []);
-      await load();
-      setTab("Calls");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save office call");
     } finally {
       setBusy(false);
     }
@@ -356,7 +313,6 @@ export default function PatientRoomPage() {
           handoff: data.handoff,
           team_activity: data.team_activity,
           room_messages: (data.room?.messages || []).slice(-12),
-          visit_transcript: visitOut,
           active_tab: tab,
           rx_draft: rxAnalysis
             ? { proposed: rxAnalysis.proposed, severity: rxAnalysis.severity }
@@ -416,9 +372,12 @@ export default function PatientRoomPage() {
             <p className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--brand)]">
               Shared chart
             </p>
-            <h1 className="font-display mt-2 text-[clamp(2rem,3.5vw,3rem)] font-extrabold tracking-tight text-[var(--ink)]">
-              {p.label}
-            </h1>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <h1 className="font-display text-[clamp(2rem,3.5vw,3rem)] font-extrabold tracking-tight text-[var(--ink)]">
+                {p.label}
+              </h1>
+              <LiveStatusBadge status={liveStatus[p.id]} />
+            </div>
             <p className="mt-2 text-sm text-[var(--muted)]">
               Age {p.age}
               {data.connections?.bond_score != null
@@ -611,7 +570,7 @@ export default function PatientRoomPage() {
               tab === t ? "tab-active" : "tab-idle"
             }`}
           >
-            {t}
+            {t === "Calls" ? "Ava" : t}
           </button>
         ))}
       </nav>
@@ -642,10 +601,20 @@ export default function PatientRoomPage() {
                     className="flex items-start justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm"
                   >
                     <div className="min-w-0">
-                      <p className="font-semibold">
-                        {rx.name}{" "}
+                      <button
+                        type="button"
+                        onClick={() => setFdaMed({ name: rx.name, dose: rx.dose })}
+                        className="group text-left font-semibold"
+                        title="Open openFDA medicine profile"
+                      >
+                        <span className="underline decoration-sky-300 decoration-2 underline-offset-4 group-hover:text-sky-800">
+                          {rx.name}
+                        </span>{" "}
                         <span className="font-normal text-[var(--muted)]">{rx.dose}</span>
-                      </p>
+                        <span className="ml-1.5 rounded bg-sky-100 px-1 py-0.5 align-middle text-[9px] font-extrabold text-sky-800">
+                          FDA
+                        </span>
+                      </button>
                       <p className="text-xs text-[var(--muted)]">
                         {doctorName(rx.prescribed_by)} · {rx.reason}
                       </p>
@@ -688,7 +657,14 @@ export default function PatientRoomPage() {
               {p.prescriptions.map((rx) => (
                 <li key={rx.id} className="border-b border-[var(--line)] py-2 text-sm">
                   <div className="flex justify-between gap-2">
-                    <span className="font-semibold">{rx.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setFdaMed({ name: rx.name, dose: rx.dose })}
+                      className="font-semibold underline decoration-sky-300 decoration-2 underline-offset-4 hover:text-sky-800"
+                      title="Open openFDA medicine profile"
+                    >
+                      {rx.name}
+                    </button>
                     <span className="text-xs uppercase text-[var(--muted)]">{rx.status}</span>
                   </div>
                   <p className="text-xs text-[var(--muted)]">
@@ -784,10 +760,20 @@ export default function PatientRoomPage() {
                       className="flex items-start justify-between gap-3 rounded-xl border border-[var(--line)] px-3 py-2 text-sm"
                     >
                       <div className="min-w-0">
-                        <p className="font-semibold">
-                          {rx.name}{" "}
+                        <button
+                          type="button"
+                          onClick={() => setFdaMed({ name: rx.name, dose: rx.dose })}
+                          className="group text-left font-semibold"
+                          title="Open openFDA medicine profile"
+                        >
+                          <span className="underline decoration-sky-300 decoration-2 underline-offset-4 group-hover:text-sky-800">
+                            {rx.name}
+                          </span>{" "}
                           <span className="font-normal text-[var(--muted)]">{rx.dose}</span>
-                        </p>
+                          <span className="ml-1.5 rounded bg-sky-100 px-1 py-0.5 align-middle text-[9px] font-extrabold text-sky-800">
+                            FDA
+                          </span>
+                        </button>
                         <p className="text-xs text-[var(--muted)]">
                           {doctorName(rx.prescribed_by)} · {rx.reason}
                         </p>
@@ -953,6 +939,9 @@ export default function PatientRoomPage() {
                 <p className="text-xs text-[var(--muted)]">
                   {m.specialty} · {m.closeness}
                 </p>
+                <div className="mt-2">
+                  <LiveStatusBadge status={liveStatus[m.id]} />
+                </div>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
                   <div
                     className="h-full rounded-full bg-[var(--brand)]"
@@ -1029,6 +1018,11 @@ export default function PatientRoomPage() {
                 ? "Visible to the full care team. Live sync refreshes the team briefing."
                 : `Only you and ${p.label}. Messages they send to you land here.`}
             </p>
+            {talkChannel === "private" && (
+              <div className="mt-2">
+                <LiveStatusBadge status={liveStatus[p.id]} />
+              </div>
+            )}
           </div>
           <div className="max-h-[360px] space-y-3 overflow-y-auto px-5 py-4">
             {talkMessages.map((m) => (
@@ -1055,7 +1049,11 @@ export default function PatientRoomPage() {
                   </span>
                   <span>{new Date(m.timestamp).toLocaleTimeString()}</span>
                 </div>
-                <p className="mt-1">{m.text}</p>
+                {m.kind === "voice" && m.audio_id ? (
+                  <VoiceMessage patientId={p.id} message={m} />
+                ) : (
+                  <p className="mt-1">{m.text}</p>
+                )}
               </div>
             ))}
             {!talkMessages.length && (
@@ -1091,57 +1089,51 @@ export default function PatientRoomPage() {
 
       {tab === "Calls" && (
         <section className="space-y-4">
-          <div className="card p-5 space-y-4">
-            <h2 className="font-display text-lg font-bold">Office calls</h2>
-            <p className="text-sm text-[var(--muted)]">
-              When you are unavailable, the patient calls your office. A health
-              assistant takes the conversation, then ClearPath sends you an
-              insight so you can reply in Patient private chat.
-            </p>
-            {user?.kind === "doctor" && (
-              <div className="flex flex-wrap items-center gap-3">
-                {recording ? (
-                  <button
-                    type="button"
-                    onClick={stopRecording}
-                    className="flex items-center gap-2.5 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white"
-                  >
-                    <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-white" />
-                    Stop and send to Muse · {Math.floor(recSeconds / 60)}:
-                    {String(recSeconds % 60).padStart(2, "0")}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={startRecording}
-                    className="flex items-center gap-2.5 rounded-xl bg-[var(--ink)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
-                  >
-                    <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-                    {busy ? "Transcribing with Muse…" : "Record office call"}
-                  </button>
-                )}
-                {!recording && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => runVisitDemo()}
-                    className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    Use demo call
-                  </button>
-                )}
-                <span className="text-xs text-[var(--muted)]">
-                  {data.muse?.enabled
-                    ? "Meta Muse Voice transcribes the recording."
-                    : "Muse key not set, recordings fall back to a demo transcript."}
-                </span>
+          {user?.kind === "doctor" && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand)]">
+                    Talk to Ava
+                  </p>
+                  <h2 className="font-display mt-1 text-lg font-bold">
+                    Send {p.label} an update by voice
+                  </h2>
+                  <p className="text-sm text-[var(--muted)]">
+                    Tell Ava what {p.label} needs to know. She asks what&apos;s missing, writes it
+                    in plain language, and you send it to their private chat.
+                  </p>
+                </div>
+                <LiveStatusBadge status={liveStatus[p.id]} />
               </div>
-            )}
+              <AssistantConversation
+                mode="doctor"
+                patientId={p.id}
+                patientLabel={p.label}
+                tts={data.assistant?.tts}
+                medicines={p.prescriptions.filter((x) => x.status === "active").map((x) => x.name)}
+                seed={avaSeed}
+                onSent={(room) => setData((d) => (d ? { ...d, room } : d))}
+              />
+            </div>
+          )}
+
+          <div className="card space-y-2 p-5">
+            <h2 className="font-display text-lg font-bold">Patient conversations with Ava</h2>
+            <p className="text-sm text-[var(--muted)]">
+              When you are unavailable, {p.label} can talk to Ava. The conversations they
+              send to you land here with a summary, and you can reply in Patient private chat.
+            </p>
           </div>
 
           {(officeCalls.length ? officeCalls : data.office_calls || [])
-            .filter((c) => !user || user.kind !== "doctor" || c.doctor_id === user.id)
+            .filter(
+              (c) =>
+                !user ||
+                user.kind !== "doctor" ||
+                c.doctor_id === user.id ||
+                !!c.recipient_ids?.includes(user.id)
+            )
             .map((call) => (
               <article
                 key={call.id}
@@ -1153,27 +1145,43 @@ export default function PatientRoomPage() {
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand)]">
-                      {call.status === "new"
-                        ? "Needs your review"
-                        : call.status === "responded"
-                          ? "Responded"
-                          : "Read"}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand)]">
+                        {call.status === "new"
+                          ? "Needs your review"
+                          : call.status === "responded"
+                            ? "Responded"
+                            : "Read"}
+                      </p>
+                      {call.urgency === "urgent" && (
+                        <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700">
+                          Urgent
+                        </span>
+                      )}
+                      {call.urgency === "soon" && (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                          Soon
+                        </span>
+                      )}
+                    </div>
                     <h3 className="font-display mt-1 text-lg font-bold text-[var(--ink)]">
                       {call.topic}
                     </h3>
                     <p className="mt-1 text-xs text-[var(--muted)]">
-                      {call.assistant_label} · {call.doctor_label}&apos;s office ·{" "}
-                      {new Date(call.created_at).toLocaleString()}
-                      {call.source === "muse_voice" && (
+                      {call.assistant_label} ·{" "}
+                      {call.recipient_label
+                        ? `sent to ${call.recipient_label}`
+                        : `${call.doctor_label}'s office`}{" "}
+                      · {new Date(call.created_at).toLocaleString()}
+                      {(call.source === "muse_voice" || call.source === "ava_voice") && (
                         <span className="ml-2 rounded-full bg-violet-100 px-2 py-0.5 font-semibold text-violet-700">
-                          Recorded · Muse Voice
+                          {call.source === "ava_voice" ? "Voice with Ava · Muse Voice" : "Recorded · Muse Voice"}
                         </span>
                       )}
                     </p>
                   </div>
-                  {user?.kind === "doctor" && user.id === call.doctor_id && (
+                  {user?.kind === "doctor" &&
+                    (user.id === call.doctor_id || !!call.recipient_ids?.includes(user.id)) && (
                     <button
                       type="button"
                       onClick={() => replyToCall(call)}
@@ -1188,7 +1196,7 @@ export default function PatientRoomPage() {
                 </p>
                 <details className="mt-3">
                   <summary className="cursor-pointer text-xs font-semibold text-[var(--muted)]">
-                    Full assistant ↔ patient conversation
+                    Full conversation
                   </summary>
                   <p className="mt-2 whitespace-pre-line rounded-xl bg-[var(--paper)] px-3 py-3 text-sm text-[var(--ink)]">
                     {call.transcript}
@@ -1199,21 +1207,34 @@ export default function PatientRoomPage() {
 
           {!officeCalls.length && !(data.office_calls || []).length && (
             <p className="text-sm text-[var(--muted)]">
-              No office calls yet. When {p.label} calls while you are away, the
-              insight will show here.
+              No conversations yet. When {p.label} talks to Ava and sends it to you, the
+              summary will show here.
             </p>
           )}
 
-          {visitOut && (
-            <div className="card p-4 text-sm">
-              <p className="text-xs font-bold uppercase text-[var(--muted)]">
-                Latest transcript ·{" "}
-                {visitSource === "muse_voice" ? "Meta Muse Voice" : visitSource || "demo"}
-              </p>
-              <p className="mt-2 whitespace-pre-line">{visitOut}</p>
-            </div>
-          )}
         </section>
+      )}
+
+      {fdaMed && (
+        <MedicineFdaCard
+          name={fdaMed.name}
+          dose={fdaMed.dose}
+          patientId={p.id}
+          patientLabel={p.label}
+          onClose={() => setFdaMed(null)}
+          onAskAva={
+            user?.kind === "doctor"
+              ? (name) => {
+                  setFdaMed(null);
+                  setTab("Calls");
+                  setAvaSeed({
+                    text: `Help me explain ${name} to ${p.label}: what it's for, the most common side effects, and what to watch for.`,
+                    nonce: Date.now(),
+                  });
+                }
+              : undefined
+          }
+        />
       )}
     </main>
   );

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useAskScreen } from "@/lib/askScreen";
+import { lastSeenText, useLiveStatus } from "@/lib/presence";
 import type { PatientListItem } from "@/lib/types";
 
 export default function PatientsPage() {
@@ -14,6 +15,7 @@ export default function PatientsPage() {
   const [patients, setPatients] = useState<PatientListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const liveStatus = useLiveStatus(patients.map((p) => p.id));
 
   useAskScreen(
     { patients, patient_count: patients.length },
@@ -80,7 +82,8 @@ export default function PatientsPage() {
 
         <ul>
           {filtered.map((p, i) => {
-            const active = !!p.viewing_now?.length;
+            const status = liveStatus[p.id];
+            const active = !!status?.online;
             return (
               <li
                 key={p.id}
@@ -106,12 +109,12 @@ export default function PatientsPage() {
                           }`}
                           aria-hidden
                         />
-                        {active ? "Active" : "Inactive"}
+                        {active ? "Active now" : status ? lastSeenText(status).replace(/^Offline$/, "Inactive") : "Checking…"}
                       </span>
                     </div>
-                    {active && (
+                    {!!p.viewing_now?.length && (
                       <p className="mt-1 text-xs text-[var(--muted)]">
-                        {p.viewing_now!.join(", ")}
+                        In the room: {p.viewing_now.join(", ")}
                       </p>
                     )}
                   </div>

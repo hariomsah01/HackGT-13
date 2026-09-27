@@ -6,18 +6,18 @@ import { usePathname, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { AskScreenProvider } from "@/lib/askScreen";
+import { useLiveStatus } from "@/lib/presence";
 import { GlobalAsk } from "@/components/GlobalAsk";
 import type { DoctorNotification } from "@/lib/types";
 
 const doctorTabs = [
   { href: "/app/patients", label: "Patients", hint: "Your charts" },
-  { href: "/app/insights", label: "Insights", hint: "Live overview" },
-  { href: "/app/updates", label: "Updates", hint: "Team handoffs" },
+  { href: "/app/insights", label: "Insights", hint: "Handoffs & activity" },
 ];
 
 const patientTabs = [
   { href: "/app/me", label: "My care", hint: "Your chart" },
-  { href: "/app/updates", label: "Updates", hint: "Your care overview" },
+  { href: "/app/insights", label: "Insights", hint: "Your care overview" },
 ];
 
 function Mark({ light = false }: { light?: boolean }) {
@@ -58,8 +58,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [notes, setNotes] = useState<DoctorNotification[]>([]);
   const [unread, setUnread] = useState(0);
 
+  useLiveStatus([]);
+
   useEffect(() => {
-    if (!token || user?.kind !== "doctor") return;
+    if (!token) return;
+    const leave = () => api.presenceLeave(token);
+    window.addEventListener("pagehide", leave);
+    return () => window.removeEventListener("pagehide", leave);
+  }, [token]);
+
+  function signOut() {
+    if (token) api.presenceLeave(token);
+    logout();
+    router.push("/login");
+  }
+
+  useEffect(() => {
+    if (!token || !user) return;
     let cancelled = false;
     const load = () => {
       api
@@ -78,13 +93,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       cancelled = true;
       clearInterval(t);
     };
-  }, [token, user?.kind]);
+  }, [token, user]);
 
   async function openNote(n: DoctorNotification) {
     if (!token) return;
     setNotes((prev) => prev.filter((x) => x.id !== n.id));
     setUnread((u) => Math.max(0, u - 1));
-    router.push(`/app/patients/${n.patient_id}?tab=Calls`);
+    router.push(
+      user?.kind === "patient"
+        ? "/app/me#message-team"
+        : `/app/patients/${n.patient_id}?tab=Calls`
+    );
     api.readNotification(n.id, token).catch(() => {});
   }
 
@@ -126,11 +145,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 );
               })}
             </nav>
-            {user?.kind === "doctor" && (
+            {user && (
               <div className="mx-3 mb-3 rounded-xl border border-white/10 bg-white/5 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--sidebar-muted)]">
-                    Office calls
+                    {user.kind === "doctor" ? "Ava conversations" : "From your doctors"}
                   </p>
                   {unread > 0 && (
                     <span className="rounded-full bg-teal-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900">
@@ -153,7 +172,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   ))}
                   {!notes.length && (
                     <li className="px-1 text-[11px] text-[var(--sidebar-muted)]">
-                      No new office calls.
+                      {user.kind === "doctor" ? "No new conversations." : "No new messages."}
                     </li>
                   )}
                 </ul>
@@ -175,8 +194,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 onClick={() => {
-                  logout();
-                  router.push("/login");
+                  signOut();
                 }}
                 className="mt-3 w-full rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-[var(--sidebar-muted)] transition hover:bg-white/5 hover:text-white"
               >
@@ -191,8 +209,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 onClick={() => {
-                  logout();
-                  router.push("/login");
+                  signOut();
                 }}
                 className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs font-semibold"
               >
@@ -212,6 +229,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Link>
               ))}
             </nav>
+            {notes.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto border-b border-[var(--line)] bg-teal-50 px-3 py-2 md:hidden">
+                {notes.slice(0, 5).map((n) => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() => openNote(n)}
+                    className="shrink-0 rounded-full bg-white px-3 py-1.5 text-left text-xs font-semibold text-teal-900 shadow-sm"
+                  >
+                    {n.title}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className="flex w-full min-w-0 max-w-none flex-1 flex-col">
               {children}
@@ -234,8 +265,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <button
                   type="button"
                   onClick={() => {
-                    logout();
-                    router.push("/login");
+                    signOut();
                   }}
                   className="rounded-full border border-[var(--line)] bg-white px-3 py-1.5 text-sm font-semibold"
                 >
