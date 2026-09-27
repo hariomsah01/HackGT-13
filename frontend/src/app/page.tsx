@@ -20,37 +20,48 @@ const PROBLEMS = [
     "Cardiology adds a blood thinner. Nephrology never sees it. The patient fills both scripts at different pharmacies.",
   ],
   [
-    "Surgery stuck on paperwork",
-    "The knee replacement is medically ready. The insurer asks for therapy notes that live in another clinic's system.",
+    "Phone tag with the office",
+    "The patient calls about a new symptom. It becomes a sticky note at the front desk, and the doctor sees it two days later.",
   ],
 ] as const;
 
-const FEATURES = [
-  [
-    "Shared room presence",
-    "Open Patient 1 and see which doctors are in the chart now, plus the last note each one left.",
-  ],
-  [
-    "Visit audio to note",
-    "Call the office while the doctor is away. A health assistant captures the conversation and alerts the doctor with what you need.",
-  ],
-  [
-    "Rx safety before save",
-    "Type a new medicine and run Analyze safety. ClearPath checks the shared chart plus NIH RxNav / OpenFDA for dangerous overlaps.",
-  ],
-  [
-    "Team briefing card",
-    "At the top of the room: owner and next step. Muse refreshes it when the huddle changes.",
-  ],
-  [
-    "Ask across the chart",
-    "Ask which patients need attention or what Patient 1 is on. Gemini answers from live ClearPath data.",
-  ],
-  [
-    "Patient-facing summary",
-    "Patients open My care and read conditions and medicines in plain language, without clinic jargon.",
-  ],
+const PA_PULLED = [
+  "Diagnosis and codes",
+  "What's already been tried",
+  "Notes from the other doctors",
+  "Urgency, so rush cases go first",
 ] as const;
+
+const FEATURES: { tag: string; title: string; body: string; example?: string }[] = [
+  {
+    tag: "Patients and doctors",
+    title: "Talk to Ava instead of waiting on hold",
+    body: "Patients tell Ava what's going on and choose which doctor should hear it. Doctors reply the same way, and Ava turns the answer into plain words and a voice note.",
+    example: "“My ankles have been swelling since Tuesday.”",
+  },
+  {
+    tag: "Patients and doctors",
+    title: "Straight answers about medicines",
+    body: "Tap any medicine to see its FDA label, warnings and reported side effects. When a patient asks Ava about a pill, she answers from that same label.",
+    example: "“What are the side effects of my blood pressure pill?”",
+  },
+  {
+    tag: "Doctors",
+    title: "A second look before you prescribe",
+    body: "Every new prescription is checked against everything the patient already takes, from every doctor, before it's saved.",
+    example: "Checked with NIH RxNav and FDA labels",
+  },
+  {
+    tag: "Patients and doctors",
+    title: "See who's around",
+    body: "Doctors can see which patients are in the app right now. Patients can see which doctors are online before they send a message.",
+  },
+  {
+    tag: "Everyone",
+    title: "One chart everyone works from",
+    body: "Approvals, messages and medicine changes all come from the same record. Nobody faxes history, retypes notes or plays phone tag.",
+  },
+];
 
 const PA_REQUESTS = [
   {
@@ -100,9 +111,11 @@ const AUDIENCE = [
 ] as const;
 
 const ENGINES = [
-  ["Meta Muse", "Transcribes visits and writes the team briefing."],
+  ["Meta Muse", "Transcribes every voice conversation with Ava and writes the team briefing."],
+  ["ElevenLabs", "Gives Ava her natural British voice in real time."],
+  ["openFDA", "Powers medicine profiles, real-world side-effect reports and Ava's medicine answers."],
   ["Google Gemini", "Answers questions about anything on the platform."],
-  ["OpenAI", "Reviews each new prescription for safety."],
+  ["OpenAI", "Runs Ava's side of the conversation and reviews each new prescription for safety."],
   ["Grok bot", "Powers the PA automation demo and live care checks."],
 ] as const;
 
@@ -362,32 +375,83 @@ export default function HomePage() {
         <div className="site-wrap py-20 lg:py-28">
           <div className="flex flex-wrap items-end justify-between gap-6">
             <div>
-              <p className="section-kicker">What you get</p>
-              <h2 className="section-title max-w-[18ch]">What actually ships in the product today.</h2>
+              <p className="section-kicker">What it does</p>
+              <h2 className="section-title max-w-[18ch]">Less waiting, for everyone.</h2>
             </div>
             <p className="max-w-[38ch] text-[clamp(1rem,1.1vw,1.35rem)] leading-relaxed text-[var(--muted)]">
-              Each item maps to a screen or button you can try after you sign in as
-              Doctor A.
+              All of this works in the demo. Sign in as Doctor A or Patient 1 and
+              click around.
             </p>
           </div>
-          <ul className="mt-12 grid gap-5 sm:grid-cols-2 lg:mt-16 lg:grid-cols-3 lg:gap-6">
-            {FEATURES.map(([title, detail], i) => (
-              <li
-                key={title}
-                className="group rounded-3xl border border-[var(--line)] bg-white p-[clamp(1.5rem,2vw,2.5rem)] transition duration-300 hover:-translate-y-1.5 hover:border-teal-700/30 hover:shadow-[0_24px_50px_rgba(15,23,42,0.08)]"
+
+          <div className="mt-12 grid gap-5 lg:mt-16 lg:grid-cols-3 lg:gap-6">
+            <article className="flex flex-col rounded-3xl bg-[var(--brand)] p-[clamp(1.75rem,2.4vw,2.75rem)] text-white shadow-[0_24px_60px_rgba(15,80,75,0.25)] lg:row-span-2">
+              <p className="text-sm font-semibold text-white/70">Doctors · Our main focus</p>
+              <h3 className="font-display mt-4 text-[clamp(1.6rem,2.1vw,2.4rem)] font-bold leading-tight tracking-tight">
+                Prior authorizations that fill themselves in
+              </h3>
+              <p className="mt-4 text-[clamp(0.98rem,1.05vw,1.15rem)] leading-relaxed text-white/85">
+                Order a scan, surgery, procedure or medicine that needs insurance
+                approval, and the request is already written from the chart. You
+                review it and send it.
+              </p>
+              <div className="mt-8 rounded-2xl bg-white/10 p-5 lg:mt-auto">
+                <p className="text-xs font-semibold uppercase tracking-wider text-white/60">
+                  Pulled from the chart
+                </p>
+                <ul className="mt-3 space-y-2.5">
+                  {PA_PULLED.map((item) => (
+                    <li key={item} className="flex items-center gap-3 text-[0.95rem]">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white text-[0.7rem] font-bold text-[var(--brand)]">
+                        ✓
+                      </span>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </article>
+
+            {FEATURES.slice(0, 4).map((f) => (
+              <article
+                key={f.title}
+                className="flex flex-col rounded-3xl border border-[var(--line)] bg-white p-[clamp(1.5rem,2vw,2.25rem)] transition duration-300 hover:-translate-y-1 hover:border-teal-700/30 hover:shadow-[0_20px_44px_rgba(15,23,42,0.07)]"
               >
-                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--brand-soft)] font-display text-base font-bold text-teal-900 transition group-hover:bg-[var(--brand)] group-hover:text-white">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <p className="font-display mt-6 text-[clamp(1.25rem,1.5vw,1.8rem)] font-bold tracking-tight">
-                  {title}
+                <p className="flex items-center gap-2 text-sm font-medium text-[var(--muted)]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--brand)]" />
+                  {f.tag}
                 </p>
-                <p className="mt-2 text-[clamp(0.95rem,1vw,1.15rem)] leading-relaxed text-[var(--muted)]">
-                  {detail}
+                <h3 className="font-display mt-3 text-[clamp(1.2rem,1.4vw,1.6rem)] font-bold leading-snug tracking-tight">
+                  {f.title}
+                </h3>
+                <p className="mt-2.5 text-[clamp(0.95rem,1vw,1.08rem)] leading-relaxed text-[var(--muted)]">
+                  {f.body}
                 </p>
-              </li>
+                {f.example && (
+                  <p className="mt-5 border-l-2 border-teal-600/40 pl-3 text-sm italic text-teal-900/80 lg:mt-auto lg:pt-5">
+                    {f.example}
+                  </p>
+                )}
+              </article>
             ))}
-          </ul>
+
+            {FEATURES.slice(4).map((f) => (
+              <article
+                key={f.title}
+                className="flex flex-col gap-3 rounded-3xl bg-[var(--brand-soft)] p-[clamp(1.5rem,2vw,2.25rem)] lg:col-span-3 lg:flex-row lg:items-center lg:justify-between lg:gap-12"
+              >
+                <div>
+                  <p className="text-sm font-medium text-teal-900/70">{f.tag}</p>
+                  <h3 className="font-display mt-1 text-[clamp(1.2rem,1.5vw,1.7rem)] font-bold tracking-tight">
+                    {f.title}
+                  </h3>
+                </div>
+                <p className="max-w-[60ch] text-[clamp(0.95rem,1vw,1.1rem)] leading-relaxed text-teal-950/75">
+                  {f.body}
+                </p>
+              </article>
+            ))}
+          </div>
         </div>
       </section>
 
