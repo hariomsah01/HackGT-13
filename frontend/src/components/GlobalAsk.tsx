@@ -24,8 +24,8 @@ function routeLabel(pathname: string): string {
   if (pathname.startsWith("/app/patients/") && pathname !== "/app/patients")
     return "Patient room";
   if (pathname.startsWith("/app/patients")) return "Patients";
-  if (pathname.startsWith("/app/insights")) return "Insights";
-  if (pathname.startsWith("/app/updates")) return "Updates";
+  if (pathname.startsWith("/app/insights") || pathname.startsWith("/app/updates"))
+    return "Insights";
   if (pathname.startsWith("/app/me")) return "My care";
   if (pathname.startsWith("/login")) return "Sign in";
   if (pathname === "/") return "Home";
